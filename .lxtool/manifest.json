@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "kind": "lx-tool",
   "name": "LXMaxAnimation",
-  "description": "按角色管理 Max 模型、动画和 Pose，一键导入 Unity，同步私有 GitHub 资产库。",
+  "description": "连接 Max，以 T-pose 管理角色、完整动画场景和 Pose，编辑独立 Clip 配置。",
   "version": "0.0.0",
   "category": "动画管线",
   "icon": ".lxtool/icon.png",
@@ -12,14 +12,18 @@
   "actions": {},
   "files": {
     ".lxtool/icon.png": "7a100cb728acb642ab228373a4bff7475b3704aafbcad7863531322217bebfd2",
-    ".lxtool/README.md": "ff9f5d791c18d316c93da7aca0eff76016106b2f7f7a635893dd5d6cd2f6eb1c",
+    ".lxtool/README.md": "2f51a28dac8846a94ebc3a98fa2ff6f92d9edec3f58dfaed2d5e92415c4e76c3",
     ".lxtool/panel.json": "8dbce71d0ca9feb12cbf3d05b82693b3f8c7254a05f0ed91a305a8c0fb31cdd2",
     "ui/__init__.py": "832ba713741f115fd0f348ffeb5a036e7530f4a6702e2dd341b135f0d17c6b5a",
-    "ui/library.py": "b7cb99b7ad2e03a45354e63efe0899dd76c95c69e1f16a06de74abedccd90c79",
+    "ui/library.py": "6254ae3f3bc69600aff895294ffdae42c520ba7f1d948c456466d27fed7c2d0c",
     "ui/integrations.py": "ee20194e3631f627974be5436f9bd37eaee7f8290fcead1c330d2c2c3ebc269f",
-    "ui/panel.py": "8465bd2eccd26cd89ba5233583c22f1fb7c90f93185d6e5ab0cb1ba91cfaf17a",
+    "ui/panel.py": "cf682f14fed1d8e1cb90cdca072b10b53c830b7fc3a7708947680e9338738329",
+    "ui/clips.py": "834a201ffb12269e18600b2a81b9eb445317aaa4575a4895ab309e0e183cfebf",
+    "ui/clip_editor.py": "9a29d8ff87550722a27e8e066c1e4867a08bbd0bac2e330c809c0591d8acb17e",
+    "ui/dialogs.py": "e0cf015afdcd0a80e80365ee79e3f19ac6b22958544ee99095401575002f381a",
+    "ui/fbx_settings.py": "1cc4bc3d41e8144166fc919e46d36668f0072c1e3136c75944adf1c0f6dc65fe",
+    "ui/unity-schema.json": "abe76da07ee01974a15813d9a64984714a6f5b5792f56dddf6e2520bda9c38b7",
     "max/bootstrap.ms": "4d571cdb39f236f9fe460213246d7b962948c9efe9eebe7792ca4a43aa3f6a53",
-    "max/bridge.py": "0d9ec64aae6fb32afed1c491412393fea5f12d2a01f04994128d95b55bec2f11",
-    "unity/LXMaxAnimationReceiver.cs": "081ec6fd545a4aaa423108712fddc87a972df59446a1eff8e93ba2b5abed5a34"
+    "max/bridge.py": "dd62be4eba1737812ceb444373a65fbcad0b677ee44a09378a0dde63ff55ed89"
   }
 }

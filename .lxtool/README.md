@@ -1,34 +1,36 @@
 # LXMaxAnimation
 
-按角色管理模型、贴图、骨骼 T-pose、动画和单帧 Pose，连接 3ds Max、Unity / 团结引擎与私有 GitHub 资产仓库。
+LXTool 内嵌的 Max 角色、动画和 Pose 资产面板。开发版本 0.0.0；从开发版“发现工具”安装 GitHub 最新分支，再从“我的工具”打开。没有独立应用。
 
-界面内嵌在 LXTool 内容区，从“我的工具”打开；使用工具架的窗口和运行时。面板随工具架导航打开、关闭和重新加载。
+## 当前流程
+1. 在目标 Max 窗口运行包内 `max/bootstrap.ms`，面板点击“连接 Max”选择该窗口。只绑定一个实例；断开后不会自动切换。
+2. 将角色摆成 T-pose，**选中全部角色内容**：模型、骨骼、独立控制器、辅助节点等。在“角色库”点击“从 Max 导入角色”。贴图可选；默认截取视口头像，也可更换本地图片。角色支持搜索和自建分类。
+3. 创建动画 / Pose 或点击“从 Max 保存所选资产”时，**无需选择任何对象，读取整个场景**。必须与角色清单完全一致；多出、缺少、重名或层级结构变化会拒绝保存并列出对象。动画自动读取 Max 当前起止帧和 FPS。
+4. 双击动画，直接替换 Max 当前场景；**不自动备份**。打开的是独立工作副本，Max 的修改和 Ctrl+S 不写回库。双击 Pose，在当前帧覆盖姿态并打关键帧。
+5. 明确点击保存才从 Max 更新库。每次保存产生可追溯版本；选中动画与 Pose 都可保存。角色窗口支持更新 T-pose 和导出角色到 Max，已有动画仍保留。
+6. 左侧资产可按名称、类型、版本、备注升降序。右侧拆分 Clip，每个 Clip 有独立配置。
+7. FBX 配置覆盖 Model、Rig、Animation、Materials 与 Clip 设置，支持命名预设。预设应用只更新文件配置与当前 Clip 配置，**不改变 Clip 数量、名称、起止帧、源 Take 或备注**。提供待机循环、原地移动、根运动移动、一次性动作、根运动一次性动作五种默认配置。
+8. Unity 实际导出本轮暂停。配置写入 JSON，后续再接 Unity 与 Clip 后处理工具。
 
-## 使用
-1. 选择一个本地资产库目录并创建角色。已克隆资产库可直接选择其根目录。
-2. 在 Max 中通过 Scripting → Run Script 运行本工具 `max/bootstrap.ms`。面板刷新连接后选择目标实例。
-3. 选择普通骨骼、Biped 或 CAT。选中角色根节点及关联蒙皮模型，填写名称和动画帧范围，点击保存当前选择。
-4. 在角色列表中搜索、筛选资产。双击导入所选 Max 场景。Biped / CAT 原生动画需先选中目标角色；Pose 应用到 Max 当前帧。
-5. 选择 Unity 项目根目录和 Generic / Humanoid，点击一键导入 Unity。首次自动安装 Editor 接收器，等待项目编译与导入回执。
-6. 填写私有 GitHub 仓库地址，初始化 Git LFS；保存并推送或拉取。使用本机 Git 的登录信息，不在工具包中保存密码。
+## 文件与同步
+- 工具代码：https://github.com/gd-dd/LXMaxAnimation
+- 独立私有资产库：https://github.com/gd-dd/LXMaxAnimationLibrary
+- 模型保存 FBX、原生 MAX 选择集、T-pose、可选 Bitmap 贴图及视口头像。
+- 动画保存整个原生 MAX 场景及当前范围的 FBX；Biped / CAT 另附原生动画文件。
+- Pose 保存对象局部变换与关键帧标量控制器值，包括自定义属性；CAT 另附 PSE。
+- 每个动画版本的 `clips.json` 保存分段、文件级 FBX 设置、每段独立设置。库根目录 `unity-presets.json` 保存命名预设。
+- “资产库 / 同步”设置本地目录和远端，显式初始化 Git LFS、拉取、保存并推送；不自动上传。使用本机 Git 登录。
 
-## 保存内容
-- 模型 / T-pose：当前帧的 FBX、原生选择集 source.max、Bitmap 贴图副本、贴图映射、姿态记录。保存前请自行将角色置于 T-pose。
-- 动画：指定帧范围的 FBX 和原生选择集；Biped 同时保存 BIP，CAT 同时保存 CLP。
-- 单帧 Pose：节点名称、父子结构与局部变换；CAT 另存原生 PSE。
-- 每次保存生成独立版本和 SHA-256 清单；不覆盖旧版本。
+## 兼容性与范围
+- LXTool native API 1 / PySide6。Max 桥兼容 PySide2 / PySide6，需 pymxs 和 FBX 插件。当前实际测试为 Max 2026.3；其他版本未实测。高版本 MAX 文件不能保证由低版本打开。
+- 普通骨骼、Biped、CAT 可选择。普通控制器、自定义浮点属性、Biped 与基础 CAT 的隔离批处理已验证；复杂约束、脚本控制器、第三方插件和真实生产角色仍需验收。没有跨骨架重定向。
+- 贴图收集针对 Bitmaptexture；程序贴图和第三方材质需烘焙。不做 Unity Shader 转换。
+- FBX 字段集取自本机团结 2022.3.62t13 的公开可写 API：70 个文件级字段、31 个 Clip 字段。包含 Unity 2022.3 基础字段，团结扩展已标注。只读诊断与过时接口不作为可编辑配置；不是对所有 Unity 版本的无差别兼容承诺。
+- 基础设置使用复选框、下拉框和数值控件；Humanoid 映射、遮罩、事件、曲线、材质重映射等结构使用 JSON。Avatar / Mask 等引用填写 Unity 项目资源路径或 GUID；真正的引用解析和导入回执随后续 Unity 接入实现。
+- 关闭面板不关闭 Max。操作尚未返回时不要重复提交。连接脚本更新后需在 Max 重新运行。
+- 本轮未创建正式 Release。旧 Unity 接收器源码保留供后续迁移，不在运行包中启用。
 
-## 依赖与兼容性
-- LXTools native API 1，Python 3.12 / PySide6 6.8.3。
-- 3ds Max Python / pymxs、FBX 插件；2026 本机联调，其他版本待验证。支持 PySide6 和 PySide2 的桥接导入。
-- Unity / 团结引擎 Editor；项目必须包含 Assets 和 ProjectSettings。Generic 与 Humanoid 可选，Humanoid 需有效 Avatar。
-- Git 与 Git LFS；私有仓库需本机 Git 已登录并有写权限。
-
-## 使用边界
-- 同名同层级骨骼回灌；不自动完成不同骨架的动作重定向。普通骨骼动画回灌要求节点映射；无映射的外部 FBX 可登记和送入 Unity，需先在 Max 导入并由本工具保存后回灌。
-- Biped 使用原生 BIP，CAT 使用原生 CLP/PSE。Biped 加载为原生片段，CAT 加载至当前帧的新层；复杂约束、IK 和自定义控制器需用实际角色验证。
-- Pose 修改当前帧关键帧；不修改整个动画时间范围。Biped 动画模式下不设置骨骼缩放。
-- Max 原生模型合并保留绑定；FBX 提供 Unity 交换。高版本 source.max 无法由低版本 Max 打开。
-- 贴图收集目前针对标准 Bitmaptexture，FBX 内嵌材质不等同于 Unity Shader 转换。第三方程序材质需先烘焙为贴图。
-- 关闭面板不关闭宿主。超时提示不代表宿主已取消，检查结果后再重试。
-- 开发版本 0.0.0，未发布正式 Release。
+## 开发验证
+运行 `python -m unittest discover -s tests -p "test_*.py"`、`tests/ui_smoke.py` 和 `tests/native_loader_smoke.py <LXTools/src>`。
+`tests/max_*.py` 仅供独立 3dsmaxbatch 进程运行，会重置其测试场景，不能在工作场景执行。
+执行 `scripts/build_package.py` 刷新声明，再用 LX 工具制作技能校验并打包。详情见 `TODO.md` 与 `docs/clip-config-v1.md`。

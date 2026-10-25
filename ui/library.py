@@ -161,3 +161,96 @@ class Library:
             return self.publish(character, name, kind, stage, 'asset.fbx', metadata={'source': Path(file).name})
         finally:
             shutil.rmtree(stage)
+
+    def character_info(self, name):
+        folder = contained(self.root, 'characters/' + safe_name(name))
+        info = read_json(folder / 'character.json')
+        info.setdefault('category', '')
+        info.setdefault('avatar', '')
+        assets, _ = self.list_assets(name, kind='model')
+        current = next((a for a in assets if a['id'] == info.get('tposeAssetId')), assets[0] if assets else None)
+        info['tpose'] = current
+        return info
+
+    def categories(self):
+        return read_json(self.root / 'library.json').get('categories', [])
+
+    def add_category(self, name):
+        name = safe_name(name)
+        data = read_json(self.root / 'library.json')
+        values = data.setdefault('categories', [])
+        if name.casefold() not in [v.casefold() for v in values]:
+            values.append(name)
+            write_json(self.root / 'library.json', data)
+
+    def update_character_info(self, name, **changes):
+        folder = contained(self.root, 'characters/' + safe_name(name))
+        info = read_json(folder / 'character.json')
+        allowed = {'category', 'avatar', 'tposeAssetId', 'rig'}
+        if set(changes) - allowed:
+            raise ValueError('未知角色字段。')
+        if changes.get('category') and changes['category'] not in self.categories():
+            raise ValueError('请先创建分类。')
+        if changes.get('avatar'):
+            contained(folder, changes['avatar'])
+        info.update(changes)
+        write_json(folder / 'character.json', info)
+
+    def set_avatar(self, name, file):
+        # UI normalizes images to PNG before storing; revision name prevents cache collisions.
+        folder = contained(self.root, 'characters/' + safe_name(name))
+        relative = 'avatars/' + uuid.uuid4().hex + '.png'
+        target = contained(folder, relative)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(file, target)
+        self.update_character_info(name, avatar=relative)
+
+    def import_character(self, name, source, main, metadata, category='', update=False):
+        name = safe_name(name)
+        if category and category not in self.categories():
+            raise ValueError('分类不存在。')
+        exists = name in self.characters()
+        if exists != update:
+            raise ValueError('角色已存在，请使用更新 T-pose。' if exists else '待更新的角色不存在。')
+        if not (Path(source) / 'tpose.json').is_file():
+            raise ValueError('角色必须包含 T-pose。')
+        if not exists:
+            self.create_character(name)
+        original_info=read_json(contained(self.root,'characters/'+name)/'character.json')
+        asset=None
+        try:
+            asset = self.publish(name, 'T-pose', 'model', source, main, metadata=metadata)
+            self.update_character_info(name, tposeAssetId=asset['id'], rig=metadata.get('rig', 'Generic'), category=category)
+            avatar = Path(source) / 'avatar.png'
+            if avatar.is_file():
+                self.set_avatar(name, avatar)
+            return asset
+        except Exception:
+            # New role creation is transactional: no empty role on export/validation failure.
+            if not exists:
+                folder = contained(self.root, 'characters/' + name)
+                shutil.rmtree(folder)
+            else:
+                write_json(contained(self.root,'characters/'+name)/'character.json',original_info)
+                if asset:
+                    folder=contained(self.root,Path(asset['_directory']).relative_to(self.root))
+                    shutil.rmtree(folder)
+            raise
+
+    def mark_superseded(self, previous, current):
+        from . import clips
+        old_folder=contained(self.root,Path(previous['_directory']).relative_to(self.root))
+        new_folder=contained(self.root,Path(current['_directory']).relative_to(self.root))
+        old=read_json(old_folder/'asset.json');new=read_json(new_folder/'asset.json')
+        old['supersededBy']=current['id'];new['replaces']=previous['id']
+        if previous['kind']=='animation' and (old_folder/'clips.json').is_file():
+            data=clips.load(self,previous)
+            replacement=clips.document(current)
+            replacement['clips']=data['clips'];replacement['extensions']=data.get('extensions',{})
+            for key in ('fbxSettings','targetEditor','fieldSet'):
+                if key in data:replacement[key]=data[key]
+            try:clips.save(self,current,replacement)
+            except ValueError:
+                new['clipMigrationWarning']='旧 Clip 范围不适用于新场景，请重新拆分。原配置保留在旧版本。'
+        write_json(new_folder/'asset.json',new);write_json(old_folder/'asset.json',old)
+        return new.get('clipMigrationWarning','')

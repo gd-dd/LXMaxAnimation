@@ -25,7 +25,7 @@ try:
     rt.sliderTime=20
     bridge['apply_pose'](pose/'pose.json')
     assert abs(float(parent.position.x)-10)<0.01, str(parent.position)
-    assert int(rt.sliderTime)==20
+    assert float(rt.sliderTime)==20
     report['pose']='saved frame 5, applied frame 20; root x=10'
     rt.sliderTime=0
     model=output/'model';model.mkdir()
@@ -36,6 +36,7 @@ try:
     rt.deleteKeys(parent.controller,rt.Name('allKeys'))
     parent.position=rt.point3(0,0,0)
     report['import_animation']=bridge['import_asset']({'kind':'animation','path':str(anim/'asset.fbx')})
+    parent=rt.getNodeByName('LX_TestRoot')
     with pymxs.attime(10):assert abs(float(parent.position.x)-20)<0.01,str(parent.position)
     rt.resetMaxFile(rt.Name('noPrompt'))
     report['import_model']=bridge['import_asset']({'kind':'model','path':str(model/'asset.fbx')})

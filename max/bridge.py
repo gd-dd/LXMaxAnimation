@@ -22,14 +22,30 @@ def write_json(path, data):
     os.replace(temp,path)
 
 
-def selected_hierarchy():
+def selected_hierarchy(names=None, include_skin=False):
     found = {}
     def visit(node):
         handle = int(rt.getHandleByAnim(node))
         if handle in found:return
         found[handle]=node
         for child in node.children:visit(child)
-    for node in rt.selection:visit(node)
+    if names:
+        scene={}
+        for node in rt.objects:scene.setdefault(str(node.name),[]).append(node)
+        for name in names:
+            if len(scene.get(name,[]))!=1:raise ValueError('当前场景角色节点缺失或重名：'+name)
+            visit(scene[name][0])
+    else:
+        for node in rt.selection:visit(node)
+    if include_skin:
+        bone_names={str(node.name) for node in found.values()}
+        for node in rt.geometry:
+            for modifier in node.modifiers:
+                if str(rt.classOf(modifier))=='Skin':
+                    used={str(rt.skinOps.GetBoneName(modifier,i,0)) for i in range(1,int(rt.skinOps.GetNumberBones(modifier))+1)}
+                    if used & bone_names:
+                        if used-bone_names:raise ValueError('蒙皮模型引用了选择范围外的骨骼，请选择完整角色：'+str(node.name))
+                        visit(node)
     if not found:raise ValueError('请先选择角色根节点或完整角色。')
     names = [str(n.name) for n in found.values()]
     if len(names) != len(set(n.casefold() for n in names)):
@@ -39,6 +55,44 @@ def selected_hierarchy():
 
 def rows(matrix):
     return [[float(matrix[row][i]) for i in range(3)] for row in range(4)]
+
+
+def scene_signature(nodes):
+    result=[];seen=set()
+    for node in nodes:
+        name=str(node.name)
+        if name.casefold() in seen:raise ValueError('场景存在重名对象：'+name)
+        seen.add(name.casefold())
+        result.append({'name':name,'parent':str(node.parent.name) if node.parent else None,
+                       'class':str(rt.classOf(node)),
+                       'modifiers':[str(rt.classOf(m)) for m in node.modifiers],
+                       'customAttributes':int(rt.custAttributes.count(node))})
+    return sorted(result,key=lambda item:item['name'])
+
+
+def validate_scene(nodes,expected):
+    actual=scene_signature(nodes);current={item['name']:item for item in actual};target={item['name']:item for item in expected}
+    extra=sorted(set(current)-set(target));missing=sorted(set(target)-set(current))
+    changed=sorted(name for name in set(current)&set(target) if current[name]!=target[name])
+    errors=[]
+    if extra:errors.append('多出对象：'+', '.join(extra))
+    if missing:errors.append('缺少对象：'+', '.join(missing))
+    if changed:errors.append('类型 / 层级 / 修改器结构不一致：'+', '.join(changed))
+    if errors:raise ValueError('保存失败，当前场景与角色不一致。\n'+'\n'.join(errors))
+    return actual
+
+
+def selected_role():
+    nodes=list(rt.selection)
+    if not nodes:raise ValueError('请选中全部角色内容，包括模型、骨骼、独立控制器和辅助节点。')
+    scene_signature(nodes);names={str(n.name) for n in nodes}
+    for node in nodes:
+        if node.parent and str(node.parent.name) not in names:raise ValueError('角色选择不完整，缺少父节点：'+str(node.parent.name))
+        for modifier in node.modifiers:
+            if str(rt.classOf(modifier))=='Skin':
+                used={str(rt.skinOps.GetBoneName(modifier,i,0)) for i in range(1,int(rt.skinOps.GetNumberBones(modifier))+1)}
+                if used-names:raise ValueError('角色选择不完整，缺少蒙皮骨骼：'+', '.join(sorted(used-names)))
+    return nodes
 
 
 def matrix(value):
@@ -62,26 +116,54 @@ def rig_root(nodes, rig):
 
 
 def export_pose(nodes, destination, rig='Generic'):
-    data={'schema':1,'frame':float(rt.sliderTime),'rig':rig,'nodes':[]}
+    data={'schema':1,'frame':float(rt.sliderTime),'rig':rig,'nodes':[],'signature':scene_signature(nodes)}
     for node in nodes:
         parent=node.parent
         local=node.transform * rt.inverse(parent.transform) if parent else node.transform
-        data['nodes'].append({'name':str(node.name),'parent':str(parent.name) if parent else None,'local':rows(local)})
+        data['nodes'].append({'name':str(node.name),'parent':str(parent.name) if parent else None,'local':rows(local),'tracks':capture_tracks(node)})
     write_json(destination,data)
+
+
+def capture_tracks(node):
+    tracks=[]
+    def visit(obj,path,labels,depth):
+        if depth>12:return
+        try:count=int(obj.numSubs)
+        except Exception:return
+        for i in range(1,count+1):
+            sub=rt.getSubAnim(obj,i);label=str(rt.getSubAnimName(obj,i))
+            if 'material' in label.lower():continue
+            current=path+[i];names=labels+[label]
+            try:
+                ctrl=sub.controller;value=sub.value;cls=str(rt.classOf(ctrl)) if ctrl else ''
+                # Procedural and constraint outputs are driven by their controls;
+                # write only key-based scalar tracks, preserving their controllers.
+                if cls.lower() in ('bezier_float','linear_float','tcb_float','boolean_controller') and isinstance(value,(float,int,bool)):
+                    tracks.append({'path':current,'labels':names,'controller':cls,'value':value})
+            except Exception:pass
+            visit(sub,current,names,depth+1)
+    visit(node,[],[],0)
+    for index in range(1,int(rt.custAttributes.count(node))+1):
+        before=len(tracks)
+        visit(rt.custAttributes.get(node,index),[],[],0)
+        for track in tracks[before:]:track['attribute']=index
+    return tracks
+
+
+def resolve_track(node,record):
+    sub=rt.custAttributes.get(node,record['attribute']) if record.get('attribute') else node
+    for index,label in zip(record['path'],record['labels']):
+        if str(rt.getSubAnimName(sub,index))!=label:raise ValueError('控制器轨道结构不匹配：'+str(node.name))
+        sub=rt.getSubAnim(sub,index)
+    if str(rt.classOf(sub.controller))!=record['controller']:raise ValueError('控制器类型不匹配：'+str(node.name))
+    return sub
 
 
 def apply_pose(path, rig='Generic'):
     data=json.loads(Path(path).read_text('utf-8'))
     if data.get('schema')!=1 or not data.get('nodes'):raise ValueError('Invalid pose file')
     if data.get('rig','Generic')!=rig:raise ValueError('选择的骨骼类型与 Pose 不一致。')
-    if rig=='CAT':
-        root=rig_root(selected_hierarchy(),rig)
-        native=Path(path).parent/'pose.pse'
-        if not native.is_file():raise ValueError('CAT 原生 Pose 文件缺失。')
-        with pymxs.undo(True,'LXMaxAnimation CAT Pose'):
-            root.CATMode=1
-            root.LoadPose(str(native),rt.sliderTime)
-        return {'ok':True,'message':'CAT Pose 已加载到当前帧的独立层。'}
+    if data.get('signature'):validate_scene(list(rt.objects),data['signature'])
     scene={}
     for node in rt.objects:scene.setdefault(str(node.name),[]).append(node)
     records={record['name']:record for record in data['nodes']}
@@ -92,9 +174,10 @@ def apply_pose(path, rig='Generic'):
         if (str(node.parent.name) if node.parent else None)!=record['parent']:
             raise ValueError('父子层级不匹配：'+name)
         matrix(record['local'])
+        for track in record.get('tracks',[]):resolve_track(node,track)
         is_biped='biped' in str(rt.classOf(node)).lower()
         if is_biped and rig!='Biped':raise ValueError('目标是 Biped，请选择 Biped 模式。')
-        if rt.isProperty(node.controller,'CATParent'):raise ValueError('目标是 CAT，请选择 CAT 模式。')
+        if rt.isProperty(node.controller,'CATParent') and rig!='CAT':raise ValueError('目标是 CAT，请选择 CAT 模式。')
     ordered=[]; visiting=set()
     def add(name):
         if name in ordered:return
@@ -105,13 +188,23 @@ def apply_pose(path, rig='Generic'):
         ordered.append(name)
     for name in records:add(name)
     with pymxs.undo(True,'LXMaxAnimation Pose'),pymxs.animate(True):
+        if rig=='CAT':
+            cat=rig_root([scene[name][0] for name in records],rig)
+            if int(cat.NumLayers)<1:cat.AppendLayer('LX Pose',rt.Name('Absolute'))
+            cat.CATMode=1
         for name in ordered:
             node=scene[name][0]; local=matrix(records[name]['local'])
             world=local * node.parent.transform if node.parent else local
             if 'biped' in str(rt.classOf(node)).lower():
                 rt.biped.setTransform(node,rt.Name('rotation'),world.rotationPart,True)
                 rt.biped.setTransform(node,rt.Name('pos'),world.translationPart,True)
-            else:node.transform=world
+            else:
+                node.transform=world
+                if rig!='CAT':rt.addNewKey(node.controller,rt.sliderTime)
+        for name in ordered:
+            for track in records[name].get('tracks',[]):
+                sub=resolve_track(scene[name][0],track);sub.value=track['value']
+                rt.addNewKey(sub.controller,rt.sliderTime)
     return {'ok':True,'message':f'Pose 已应用到当前帧：{len(ordered)} 个节点。'}
 
 
@@ -122,14 +215,21 @@ def param(export,name,value=None):
 
 
 def export_asset(args):
-    nodes=selected_hierarchy(); kind=args['kind']
+    kind=args['kind']
+    if args.get('expected') is not None:
+        nodes=list(rt.objects);validate_scene(nodes,args['expected'])
+    elif kind=='model' and args.get('strictSelection'):
+        nodes=selected_role()
+    else:nodes=selected_hierarchy(args.get('nodes'), include_skin=kind=='model')
+    if kind=='animation' and args.get('sceneRange',False):
+        args=dict(args,start=float(rt.animationRange.start),end=float(rt.animationRange.end))
     rig=args.get('rig','Generic')
     if rig not in ('Generic','Biped','CAT'):raise ValueError('Unknown rig type')
     root=rig_root(nodes,rig)
-    if rig=='CAT':
+    if rig=='CAT' and not (args.get('strictSelection') or args.get('expected') is not None):
         for node in root.CATRigNodes:
             if node not in nodes:nodes.append(node)
-    elif rig=='Biped':
+    elif rig=='Biped' and not (args.get('strictSelection') or args.get('expected') is not None):
         def include(node):
             if node not in nodes:nodes.append(node)
             for child in node.children:include(child)
@@ -137,17 +237,27 @@ def export_asset(args):
     folder=Path(args['directory']).resolve()
     # Export destinations are fresh local staging folders, never existing scenes.
     if not folder.is_dir() or any(folder.iterdir()):raise ValueError('导出临时目录必须存在且为空。')
+    warnings=[]
+    if kind=='model' and args.get('captureAvatar',False):
+        try:
+            bitmap=rt.gw.getViewportDib()
+            bitmap.filename=str(folder/'avatar.png')
+            rt.save(bitmap);rt.close(bitmap)
+        except Exception as exc:warnings.append('视口截图失败，可手动设置头像：'+str(exc))
     if kind=='pose':
         if rig=='CAT' and not root.SavePose(str(folder/'pose.pse')):raise RuntimeError('CAT Pose 保存失败。')
         export_pose(nodes,folder/'pose.json',rig)
-        return {'ok':True,'main':'pose.json','metadata':{'rig':rig,'frame':float(rt.sliderTime),'nodes':len(nodes)}}
+        return {'ok':True,'main':'pose.json','metadata':{'rig':rig,'frame':float(rt.sliderTime),'nodes':[str(n.name) for n in nodes],'signature':scene_signature(nodes)}}
     if kind not in ('model','animation'):raise ValueError('Unknown asset kind')
     old_selection=list(rt.selection); old_time=rt.sliderTime
     textures=[]; missing=[]
     try:
         rt.select(nodes)
-        # Native selection keeps the rig/controllers for later manual scene recovery.
-        rt.saveNodes(nodes,str(folder/'source.max'),quiet=True)
+        # Native scene data preserves the complete rig and controllers.
+        if kind=='animation':
+            if not rt.saveMaxFile(str(folder/'source.max'),useNewFile=False,clearNeedSaveFlag=False,quiet=True):raise RuntimeError('完整 Max 场景保存失败。')
+        else:
+            if not rt.saveNodes(nodes,str(folder/'source.max'),quiet=True):raise RuntimeError('角色场景保存失败。')
         if kind=='animation' and rig=='Biped':
             rt.biped.saveBipFileSegment(root.controller,str(folder/'animation.bip'),int(args['start']),int(args['end']),rt.Name('keyPerFrame'))
         if kind=='animation' and rig=='CAT':
@@ -161,7 +271,7 @@ def export_asset(args):
             param(True,'Animation',kind=='animation')
             param(True,'Skin',True)
             param(True,'Cameras',False);param(True,'Lights',False)
-            param(True,'EmbedTextures',kind=='model')
+            param(True,'EmbedTextures',args.get('includeTextures',False))
             if kind=='animation':
                 start,end=int(args['start']),int(args['end'])
                 if start>end:raise ValueError('Invalid animation range')
@@ -169,28 +279,29 @@ def export_asset(args):
                 param(True,'BakeFrameStart',start);param(True,'BakeFrameEnd',end);param(True,'BakeFrameStep',1)
             rt.exportFile(str(folder/'asset.fbx'),rt.Name('noPrompt'),selectedOnly=True,using=rt.FBXEXP)
         finally:param(True,'PopSettings')
-        if kind=='model':
-            bitmaps={}
+        bitmaps={}
+        if args.get('includeTextures',False):
             for node in nodes:
                 for bitmap in rt.getClassInstances(rt.Bitmaptexture,target=node):
                     bitmaps[int(rt.getHandleByAnim(bitmap))]=bitmap
-            for bitmap in bitmaps.values():
-                original=str(bitmap.filename)
-                file=Path(original)
-                if not file.is_file():
-                    resolved=str(rt.mapPaths.getFullFilePath(original))
-                    file=Path(resolved)
-                if not file.is_file():missing.append(original);continue
-                suffix=hashlib.sha256(str(file.resolve()).encode()).hexdigest()[:8]
-                dest=folder/'textures'/(file.stem+'-'+suffix+file.suffix)
-                dest.parent.mkdir(exist_ok=True);shutil.copy2(file,dest)
-                textures.append({'source':original,'file':dest.relative_to(folder).as_posix()})
-            write_json(folder/'textures.json',{'textures':textures,'missing':missing})
+        for bitmap in bitmaps.values():
+            original=str(bitmap.filename)
+            file=Path(original)
+            if not file.is_file():
+                resolved=str(rt.mapPaths.getFullFilePath(original))
+                file=Path(resolved)
+            if not file.is_file():missing.append(original);continue
+            suffix=hashlib.sha256(str(file.resolve()).encode()).hexdigest()[:8]
+            dest=folder/'textures'/(file.stem+'-'+suffix+file.suffix)
+            dest.parent.mkdir(exist_ok=True);shutil.copy2(file,dest)
+            textures.append({'source':original,'file':dest.relative_to(folder).as_posix()})
+        write_json(folder/'textures.json',{'textures':textures,'missing':missing})
+        if kind=='model':
             export_pose(nodes,folder/'tpose.json',rig)
             if rig=='CAT' and not root.SavePose(str(folder/'pose.pse')):raise RuntimeError('CAT T-pose 保存失败。')
-        if missing:raise ValueError('贴图缺失，尚未归档：'+', '.join(missing))
+        if missing:warnings.append('以下贴图缺失，未复制：'+', '.join(missing))
         if not (folder/'asset.fbx').is_file() or (folder/'asset.fbx').stat().st_size==0:raise RuntimeError('FBX 导出未生成文件。')
-        return {'ok':True,'main':'asset.fbx','metadata':{'rig':rig,'fps':int(rt.frameRate),'start':args.get('start'),'end':args.get('end'),'nodes':[str(n.name) for n in nodes],'frame':float(old_time)}}
+        return {'ok':True,'main':'asset.fbx','warnings':warnings,'metadata':{'rig':rig,'fps':int(rt.frameRate),'start':args.get('start'),'end':args.get('end'),'nodes':[str(n.name) for n in nodes],'signature':scene_signature(nodes),'frame':float(old_time),'scene':str(rt.maxFilePath)+str(rt.maxFileName),'includeTextures':bool(args.get('includeTextures',False)),'warnings':warnings}}
     finally:
         rt.sliderTime=old_time
         rt.select(old_selection)
@@ -202,52 +313,26 @@ def import_asset(args):
     if not path.is_file():raise ValueError('资产文件不存在。')
     if args['kind']=='pose':return apply_pose(path,rig)
     if path.suffix.lower()!='.fbx':raise ValueError('Expected FBX')
-    if args['kind']=='animation' and rig in ('Biped','CAT'):
-        root=rig_root(selected_hierarchy(),rig)
-        native=path.parent/('animation.bip' if rig=='Biped' else 'animation.clp')
-        if not native.is_file():raise ValueError('此条目缺少 '+rig+' 原生动画，请在正确骨骼模式下重新保存。')
-        with pymxs.undo(True,'LXMaxAnimation '+rig):
-            if rig=='Biped':rt.biped.loadBipFile(root.controller,str(native))
-            else:
-                root.CATMode=1
-                root.LoadClip(str(native),rt.sliderTime)
-        return {'ok':True,'message':rig+' 原生动画已导入。'}
-    if args['kind']=='model' and (path.parent/'source.max').is_file():
+    if args['kind'] in ('animation','model') and (path.parent/'source.max').is_file():
         source=path.parent/'source.max'
-        names=[str(x) for x in rt.getMAXFileObjectNames(str(source))]
-        existing={str(n.name) for n in rt.objects}
-        if existing.intersection(names):raise ValueError('场景已有同名角色节点，请换空场景或先重命名现有角色。')
-        if not rt.mergeMAXFile(str(source),rt.Name('noRedraw'),rt.Name('select')):raise RuntimeError('Max 模型合并失败。')
+        if not source.is_file():raise ValueError('此动画没有 Max 场景快照，请从 Max 重新导入。')
+        # Open a working copy so Ctrl+S cannot overwrite an immutable library revision.
+        working_root=Path(os.environ['LOCALAPPDATA'])/'LXMaxAnimation/working-scenes';working_root.mkdir(parents=True,exist_ok=True)
+        working=working_root/(uuid.uuid4().hex+'.max');shutil.copy2(source,working)
+        if not rt.loadMaxFile(str(working),quiet=True):raise RuntimeError('动画场景加载失败。')
         textures=path.parent/'textures.json'
         if textures.is_file():
-            mapping={x['source']:str(path.parent/x['file']) for x in json.loads(textures.read_text('utf-8'))['textures']}
-            for node in rt.selection:
-                for bitmap in rt.getClassInstances(rt.Bitmaptexture,target=node):
-                    if str(bitmap.filename) in mapping:bitmap.filename=mapping[str(bitmap.filename)]
-        tpose=path.parent/'tpose.json'
-        if tpose.is_file():
-            saved_rig=json.loads(tpose.read_text('utf-8')).get('rig','Generic')
-            apply_pose(tpose,saved_rig)
-        return {'ok':True,'message':'原生模型、贴图和骨骼已合并到当前场景。'}
-    rt.pluginManager.loadClass(rt.FBXIMP)
-    param(False,'PushSettings')
-    try:
-        param(False,'ResetImport')
-        param(False,'Mode',rt.Name('exmerge' if args['kind']=='animation' else 'create'))
-        param(False,'Animation',args['kind']=='animation')
-        param(False,'Cameras',False);param(False,'Lights',False)
-        param(False,'KeepFrameRate',True)
-        if args['kind']=='animation':
-            meta=path.parent/'asset.json'
-            names=json.loads(meta.read_text('utf-8')).get('metadata',{}).get('nodes',[]) if meta.exists() else []
-            if not names:raise ValueError('外部 FBX 无节点映射，请先在 Max 手动导入检查，再从工具保存动画以便安全回灌。')
-            existing=[str(n.name) for n in rt.objects]
-            bad=[name for name in names if existing.count(name)!=1]
-            if bad:raise ValueError('目标场景节点缺失或重名：'+', '.join(bad))
-        with pymxs.undo(True,'LXMaxAnimation FBX'):
-            rt.importFile(str(path),rt.Name('noPrompt'),using=rt.FBXIMP)
-        return {'ok':True,'message':'FBX 已导入当前 Max 场景。'}
-    finally:param(False,'PopSettings')
+            mapping={}
+            for item in json.loads(textures.read_text('utf-8'))['textures']:
+                original=(path.parent/item['file']).resolve()
+                if not original.is_relative_to(path.parent.resolve()) or not original.is_file():raise ValueError('贴图路径无效。')
+                target=working_root/working.stem/original.name;target.parent.mkdir(exist_ok=True)
+                shutil.copy2(original,target);mapping[item['source']]=str(target)
+            for bitmap in rt.getClassInstances(rt.Bitmaptexture):
+                if str(bitmap.filename) in mapping:bitmap.filename=mapping[str(bitmap.filename)]
+            rt.saveMaxFile(str(working),quiet=True)
+        return {'ok':True,'working':str(working),'message':'已打开角色工作场景；编辑与保存只影响工作副本。' if args['kind']=='model' else '已替换当前 Max 场景；编辑与保存只影响工作副本。'}
+    raise ValueError('此资产没有原生 Max 场景，请从 Max 重新导入。')
 
 
 class Bridge:
@@ -263,7 +348,7 @@ class Bridge:
         if self.busy:return
         self.busy=True
         try:
-            write_json(self.root/'info.json',{'pid':os.getpid(),'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0])})
+            write_json(self.root/'info.json',{'protocol':2,'pid':os.getpid(),'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0]),'frame':float(rt.sliderTime),'start':float(rt.animationRange.start),'end':float(rt.animationRange.end),'fps':int(rt.frameRate),'selection':[str(n.name) for n in rt.selection]})
             for path in self.root.glob('*.request.json'):
                 working=path.with_suffix('.working');path.rename(working)
                 try:

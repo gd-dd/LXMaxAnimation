@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory() as temp:
         assert QApplication.instance() is app
         assert handle.widget.parentWidget() is parent
         assert not handle.widget.isWindow()
-        assert handle.widget.max_rig.count()==3
+        assert hasattr(handle.widget, "editor") and hasattr(handle.widget, "open_gallery")
         handle.widget.show();app.processEvents()
         assert handle.shutdown() is None
         app.processEvents()

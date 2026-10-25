@@ -1,0 +1,751 @@
+{
+    "version": "2022.3.62t13",
+    "importer": [
+        {
+            "name": "materialName",
+            "type": "UnityEditor.ModelImporterMaterialName",
+            "defaultJson": "\"BasedOnTextureName\"",
+            "options": [
+                "BasedOnTextureName",
+                "BasedOnMaterialName",
+                "BasedOnModelNameAndMaterialName",
+                "BasedOnTextureName_Or_ModelNameAndMaterialName"
+            ]
+        },
+        {
+            "name": "materialSearch",
+            "type": "UnityEditor.ModelImporterMaterialSearch",
+            "defaultJson": "\"RecursiveUp\"",
+            "options": [
+                "Local",
+                "RecursiveUp",
+                "Everywhere"
+            ]
+        },
+        {
+            "name": "materialLocation",
+            "type": "UnityEditor.ModelImporterMaterialLocation",
+            "defaultJson": "\"InPrefab\"",
+            "options": [
+                "External",
+                "InPrefab"
+            ]
+        },
+        {
+            "name": "globalScale",
+            "type": "System.Single",
+            "defaultJson": "1",
+            "options": []
+        },
+        {
+            "name": "importVisibility",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "useFileUnits",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "useFileScale",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "importBlendShapes",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "importBlendShapeDeformPercent",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "importCameras",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "importLights",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "addCollider",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "normalSmoothingAngle",
+            "type": "System.Single",
+            "defaultJson": "60",
+            "options": []
+        },
+        {
+            "name": "swapUVChannels",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "weldVertices",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "bakeAxisConversion",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "optimizeBones",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "keepQuads",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "indexFormat",
+            "type": "UnityEditor.ModelImporterIndexFormat",
+            "defaultJson": "\"Auto\"",
+            "options": [
+                "Auto",
+                "UInt16",
+                "UInt32"
+            ]
+        },
+        {
+            "name": "preserveHierarchy",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "generateSecondaryUV",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "secondaryUVAngleDistortion",
+            "type": "System.Single",
+            "defaultJson": "8",
+            "options": []
+        },
+        {
+            "name": "secondaryUVAreaDistortion",
+            "type": "System.Single",
+            "defaultJson": "15",
+            "options": []
+        },
+        {
+            "name": "secondaryUVHardAngle",
+            "type": "System.Single",
+            "defaultJson": "88",
+            "options": []
+        },
+        {
+            "name": "secondaryUVMarginMethod",
+            "type": "UnityEditor.ModelImporterSecondaryUVMarginMethod",
+            "defaultJson": "\"Calculate\"",
+            "options": [
+                "Manual",
+                "Calculate"
+            ]
+        },
+        {
+            "name": "secondaryUVPackMargin",
+            "type": "System.Single",
+            "defaultJson": "4",
+            "options": []
+        },
+        {
+            "name": "secondaryUVMinLightmapResolution",
+            "type": "System.Single",
+            "defaultJson": "40",
+            "options": []
+        },
+        {
+            "name": "secondaryUVMinObjectScale",
+            "type": "System.Single",
+            "defaultJson": "1",
+            "options": []
+        },
+        {
+            "name": "generateAnimations",
+            "type": "UnityEditor.ModelImporterGenerateAnimations",
+            "defaultJson": "\"GenerateAnimations\"",
+            "options": [
+                "None",
+                "InOriginalRoots",
+                "InNodes",
+                "InRoot",
+                "GenerateAnimations"
+            ]
+        },
+        {
+            "name": "isReadable",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "meshOptimizationFlags",
+            "type": "UnityEditor.MeshOptimizationFlags",
+            "defaultJson": "\"Everything\"",
+            "options": [
+                "PolygonOrder",
+                "VertexOrder",
+                "Everything"
+            ]
+        },
+        {
+            "name": "optimizeMeshPolygons",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "optimizeMeshVertices",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "skinWeights",
+            "type": "UnityEditor.ModelImporterSkinWeights",
+            "defaultJson": "\"Standard\"",
+            "options": [
+                "Standard",
+                "Custom"
+            ]
+        },
+        {
+            "name": "maxBonesPerVertex",
+            "type": "System.Int32",
+            "defaultJson": "4",
+            "options": []
+        },
+        {
+            "name": "minBoneWeight",
+            "type": "System.Single",
+            "defaultJson": "0.001",
+            "options": []
+        },
+        {
+            "name": "importNormals",
+            "type": "UnityEditor.ModelImporterNormals",
+            "defaultJson": "\"Import\"",
+            "options": [
+                "Import",
+                "Calculate",
+                "None"
+            ]
+        },
+        {
+            "name": "normalSmoothingSource",
+            "type": "UnityEditor.ModelImporterNormalSmoothingSource",
+            "defaultJson": "\"PreferSmoothingGroups\"",
+            "options": [
+                "PreferSmoothingGroups",
+                "FromSmoothingGroups",
+                "FromAngle",
+                "None"
+            ]
+        },
+        {
+            "name": "importBlendShapeNormals",
+            "type": "UnityEditor.ModelImporterNormals",
+            "defaultJson": "\"Calculate\"",
+            "options": [
+                "Import",
+                "Calculate",
+                "None"
+            ]
+        },
+        {
+            "name": "normalCalculationMode",
+            "type": "UnityEditor.ModelImporterNormalCalculationMode",
+            "defaultJson": "\"AreaAndAngleWeighted\"",
+            "options": [
+                "Unweighted_Legacy",
+                "Unweighted",
+                "AreaWeighted",
+                "AngleWeighted",
+                "AreaAndAngleWeighted"
+            ]
+        },
+        {
+            "name": "importTangents",
+            "type": "UnityEditor.ModelImporterTangents",
+            "defaultJson": "\"CalculateMikk\"",
+            "options": [
+                "Import",
+                "CalculateLegacy",
+                "None",
+                "CalculateMikk",
+                "CalculateLegacyWithSplitTangents"
+            ]
+        },
+        {
+            "name": "bakeIK",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "resampleCurves",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "removeConstantScaleCurves",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "strictVertexDataChecks",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "meshCompression",
+            "type": "UnityEditor.ModelImporterMeshCompression",
+            "defaultJson": "\"Off\"",
+            "options": [
+                "Off",
+                "Low",
+                "Medium",
+                "High",
+                "Extreme8Bit"
+            ]
+        },
+        {
+            "name": "importAnimation",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "optimizeGameObjects",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "extraExposedTransformPaths",
+            "type": "System.String[]",
+            "defaultJson": "[]",
+            "options": []
+        },
+        {
+            "name": "extraUserProperties",
+            "type": "System.String[]",
+            "defaultJson": "[]",
+            "options": []
+        },
+        {
+            "name": "animationCompression",
+            "type": "UnityEditor.ModelImporterAnimationCompression",
+            "defaultJson": "\"KeyframeReduction\"",
+            "options": [
+                "Off",
+                "KeyframeReduction",
+                "KeyframeReductionAndCompression",
+                "Optimal",
+                "ACL"
+            ]
+        },
+        {
+            "name": "importAnimatedCustomProperties",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "importConstraints",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "aCLCompressionLevel",
+            "type": "UnityEditor.ModelImporterACLCompressionLevel",
+            "defaultJson": "\"Automatic\"",
+            "options": [
+                "Medium",
+                "High",
+                "Highest",
+                "Automatic"
+            ]
+        },
+        {
+            "name": "aCLCurvePrecision",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "animationRotationError",
+            "type": "System.Single",
+            "defaultJson": "0.5",
+            "options": []
+        },
+        {
+            "name": "animationPositionError",
+            "type": "System.Single",
+            "defaultJson": "0.5",
+            "options": []
+        },
+        {
+            "name": "animationScaleError",
+            "type": "System.Single",
+            "defaultJson": "0.5",
+            "options": []
+        },
+        {
+            "name": "animationWrapMode",
+            "type": "UnityEngine.WrapMode",
+            "defaultJson": "\"Default\"",
+            "options": [
+                "Default",
+                "Once",
+                "Clamp",
+                "Loop",
+                "PingPong",
+                "ClampForever"
+            ]
+        },
+        {
+            "name": "animationType",
+            "type": "UnityEditor.ModelImporterAnimationType",
+            "defaultJson": "\"Generic\"",
+            "options": [
+                "None",
+                "Legacy",
+                "Generic",
+                "Human"
+            ]
+        },
+        {
+            "name": "humanoidOversampling",
+            "type": "UnityEditor.ModelImporterHumanoidOversampling",
+            "defaultJson": "\"X1\"",
+            "options": [
+                "X1",
+                "X2",
+                "X4",
+                "X8"
+            ]
+        },
+        {
+            "name": "motionNodeName",
+            "type": "System.String",
+            "defaultJson": "\"\"",
+            "options": []
+        },
+        {
+            "name": "avatarSetup",
+            "type": "UnityEditor.ModelImporterAvatarSetup",
+            "defaultJson": "\"NoAvatar\"",
+            "options": [
+                "NoAvatar",
+                "CreateFromThisModel",
+                "CopyFromOther"
+            ]
+        },
+        {
+            "name": "sourceAvatar",
+            "type": "UnityEngine.Avatar",
+            "defaultJson": "\"\"",
+            "options": []
+        },
+        {
+            "name": "humanDescription",
+            "type": "UnityEngine.HumanDescription",
+            "defaultJson": "{}",
+            "options": []
+        },
+        {
+            "name": "useSRGBMaterialColor",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "sortHierarchyByName",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "materialImportMode",
+            "type": "UnityEditor.ModelImporterMaterialImportMode",
+            "defaultJson": "\"ImportViaMaterialDescription\"",
+            "options": [
+                "None",
+                "ImportStandard",
+                "LegacyImport",
+                "ImportViaMaterialDescription",
+                "Import"
+            ]
+        },
+        {
+            "name": "autoGenerateAvatarMappingIfUnspecified",
+            "type": "System.Boolean",
+            "defaultJson": "true",
+            "options": []
+        },
+        {
+            "name": "isVirtualGeometry",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        }
+    ],
+    "clip": [
+        {
+            "name": "takeName",
+            "type": "System.String",
+            "defaultJson": "null",
+            "options": []
+        },
+        {
+            "name": "name",
+            "type": "System.String",
+            "defaultJson": "null",
+            "options": []
+        },
+        {
+            "name": "firstFrame",
+            "type": "System.Single",
+            "defaultJson": "0",
+            "options": []
+        },
+        {
+            "name": "lastFrame",
+            "type": "System.Single",
+            "defaultJson": "0",
+            "options": []
+        },
+        {
+            "name": "wrapMode",
+            "type": "UnityEngine.WrapMode",
+            "defaultJson": "\"Default\"",
+            "options": [
+                "Default",
+                "Once",
+                "Clamp",
+                "Loop",
+                "PingPong",
+                "ClampForever"
+            ]
+        },
+        {
+            "name": "loop",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "rotationOffset",
+            "type": "System.Single",
+            "defaultJson": "0",
+            "options": []
+        },
+        {
+            "name": "heightOffset",
+            "type": "System.Single",
+            "defaultJson": "0",
+            "options": []
+        },
+        {
+            "name": "cycleOffset",
+            "type": "System.Single",
+            "defaultJson": "0",
+            "options": []
+        },
+        {
+            "name": "additiveType",
+            "type": "System.Int32",
+            "defaultJson": "0",
+            "options": []
+        },
+        {
+            "name": "basePoseType",
+            "type": "System.Int32",
+            "defaultJson": "0",
+            "options": []
+        },
+        {
+            "name": "additiveSelectedAnimation",
+            "type": "UnityEngine.AnimationClip",
+            "defaultJson": "\"\"",
+            "options": []
+        },
+        {
+            "name": "additiveSelectedAnimationFrameIndex",
+            "type": "System.Int32",
+            "defaultJson": "0",
+            "options": []
+        },
+        {
+            "name": "loopTime",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "lockToRoot",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "loopPose",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "lockRootRotation",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "lockRootHeightY",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "lockRootPositionXZ",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "keepOriginalOrientation",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "keepOriginalPositionY",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "keepOriginalPositionXZ",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "heightFromFeet",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "mirror",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        },
+        {
+            "name": "maskType",
+            "type": "UnityEditor.ClipAnimationMaskType",
+            "defaultJson": "\"None\"",
+            "options": [
+                "CreateFromThisModel",
+                "CopyFromOther",
+                "None"
+            ]
+        },
+        {
+            "name": "maskSource",
+            "type": "UnityEngine.AvatarMask",
+            "defaultJson": "\"\"",
+            "options": []
+        },
+        {
+            "name": "events",
+            "type": "UnityEngine.AnimationEvent[]",
+            "defaultJson": "[]",
+            "options": []
+        },
+        {
+            "name": "intervals",
+            "type": "UnityEngine.AnimationInterval[]",
+            "defaultJson": "[]",
+            "options": []
+        },
+        {
+            "name": "curves",
+            "type": "UnityEditor.ClipAnimationInfoCurve[]",
+            "defaultJson": "[]",
+            "options": []
+        },
+        {
+            "name": "additiveReferencePoseFrame",
+            "type": "System.Single",
+            "defaultJson": "0",
+            "options": []
+        },
+        {
+            "name": "hasAdditiveReferencePose",
+            "type": "System.Boolean",
+            "defaultJson": "false",
+            "options": []
+        }
+    ],
+    "readOnly": [
+        "generateMaterials",
+        "importMaterials",
+        "TotalVerticesCount",
+        "TotalTrianglesCount",
+        "isUseFileUnitsSupported",
+        "fileScale",
+        "isFileScaleUsed",
+        "importedTakeInfos",
+        "transformPaths",
+        "referencedClips",
+        "isBakeIKSupported",
+        "isTangentImportSupported",
+        "defaultClipAnimations"
+    ],
+    "obsolete": [
+        "generateMaterials",
+        "importMaterials",
+        "isFileScaleUsed",
+        "splitTangentsAcrossSeams",
+        "optimizeMesh",
+        "normalImportMode",
+        "tangentImportMode",
+        "resampleRotations",
+        "splitAnimations"
+    ]
+}

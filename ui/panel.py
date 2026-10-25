@@ -1,272 +1,267 @@
-"""LX native API 1 entry point."""
+"""LXTool embedded character and animation workspace; no standalone application."""
 from pathlib import Path
 import shutil
 import time
-from PySide6.QtCore import Qt, QTimer, QThread, Signal
+from PySide6.QtCore import Qt,QTimer,QThread,Signal
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QListWidget, QTreeWidget, QTreeWidgetItem, QComboBox, QFileDialog,
-    QInputDialog, QSplitter, QFormLayout, QGroupBox, QMessageBox, QSpinBox, QHeaderView, QScrollArea)
-from .library import Library, KINDS, read_json
+from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QLineEdit,QTreeWidget,QTreeWidgetItem,
+    QComboBox,QFileDialog,QSplitter,QHeaderView,QDialog,QDialogButtonBox,QFormLayout,QMessageBox,QInputDialog)
+from .library import Library,KINDS,read_json,contained
 from . import integrations as host
+from .clip_editor import ClipEditor
+from .dialogs import CharacterDialog,CaptureDialog
 
 
 class Job(QThread):
-    done = Signal(object, str)
-    def __init__(self, callback, parent):
-        super().__init__(parent)
-        self.callback = callback
+    done=Signal(object,str)
+    def __init__(self,fn,parent):super().__init__(parent);self.fn=fn
     def run(self):
-        try:
-            self.done.emit(self.callback(), '')
-        except Exception as exc:
-            self.done.emit(None, str(exc))
+        try:self.done.emit(self.fn(),'')
+        except Exception as exc:self.done.emit(None,str(exc))
 
 
 class Panel(QWidget):
-    def __init__(self, context, parent=None):
-        super().__init__(parent)
-        self.context = context
-        self.settings = context.load_settings()
-        self.library = None
-        self.jobs = []
-        self.pending = {}
-        self.closed = False
+    def __init__(self,context,parent=None):
+        super().__init__(parent);self.context=context;self.settings=context.load_settings()
+        self.library=None;self.active_character=None;self.active_session=None;self.pending=None
+        self.jobs=[];self.closed=False;self.gallery=None;self.restoring=False
         self.setObjectName('LXAnimation')
-        self.setStyleSheet('QWidget#LXAnimation {background:#f5f7f1;color:#26382c;} QGroupBox {border:1px solid #dce4d3;border-radius:10px;margin-top:16px;padding-top:12px;} QGroupBox::title {subcontrol-origin:margin;left:12px;} QPushButton {padding:8px 13px;border:1px solid #bdcfa8;border-radius:6px;background:#eaf1df;color:#304c27;} QPushButton:hover {background:#d5e7bc;} QLineEdit,QComboBox,QSpinBox {padding:6px;border:1px solid #d3ddcb;border-radius:5px;background:white;} QTreeWidget,QListWidget {background:white;border:1px solid #dce4d3;border-radius:8px;} QTreeWidget::item {padding:8px;}')
-        shell = QVBoxLayout(self)
-        shell.setContentsMargins(0,0,0,0)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        content = QWidget(scroll)
-        layout = QVBoxLayout(content)
-        scroll.setWidget(content)
-        shell.addWidget(scroll)
-        header = QHBoxLayout()
-        icon = QLabel()
-        icon.setPixmap(QPixmap(str(context.resource('.lxtool/icon.png'))).scaled(72,72,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
-        header.addWidget(icon)
-        titles = QVBoxLayout()
-        title = QLabel('LXMaxAnimation'); title.setStyleSheet('font-size:25px;font-weight:700;')
-        titles.addWidget(title); titles.addWidget(QLabel('角色资产 · 动画库 · Max ⇄ Unity'))
-        header.addLayout(titles,1); layout.addLayout(header)
-        row = QHBoxLayout()
-        self.root = QLineEdit(self.settings.get('library','')); self.root.setReadOnly(True); self.root.setPlaceholderText('选择本地动画资产库 / Git 克隆目录')
-        row.addWidget(self.root,1); row.addWidget(self.button('选择资产库',self.choose_library)); layout.addLayout(row)
-        split = QSplitter(); layout.addWidget(split,1)
-        left = QWidget(); leftbox = QVBoxLayout(left); leftbox.addWidget(QLabel('角色'))
-        self.characters = QListWidget(); self.characters.currentTextChanged.connect(self.refresh_assets); leftbox.addWidget(self.characters)
-        leftbox.addWidget(self.button('＋ 新建角色',self.add_character)); split.addWidget(left)
-        right = QWidget(); rightbox = QVBoxLayout(right)
-        filters = QHBoxLayout()
-        self.search = QLineEdit(); self.search.setPlaceholderText('搜索动画、Pose、备注…'); self.search.textChanged.connect(self.refresh_assets)
-        self.kind = QComboBox(); self.kind.addItem('全部资产',''); [self.kind.addItem(v,k) for k,v in KINDS.items()]; self.kind.currentIndexChanged.connect(self.refresh_assets)
-        filters.addWidget(self.search,1); filters.addWidget(self.kind); filters.addWidget(self.button('刷新',self.refresh_assets)); rightbox.addLayout(filters)
-        self.assets = QTreeWidget(); self.assets.setHeaderLabels(['名称','类型','版本 / UTC','备注']); self.assets.setRootIsDecorated(False)
-        self.assets.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch)
-        self.assets.itemDoubleClicked.connect(lambda *_:self.guard(self.import_max)); rightbox.addWidget(self.assets,1)
-        buttons = QHBoxLayout()
-        buttons.addWidget(self.button('登记已有 FBX',self.import_file)); buttons.addWidget(self.button('导入 Max',self.import_max)); buttons.addWidget(self.button('一键导入 Unity',self.import_unity)); rightbox.addLayout(buttons)
-        split.addWidget(right); split.setSizes([180,760])
-        maxbox = QGroupBox('3ds Max · 当前场景'); maxlayout = QVBoxLayout(maxbox)
-        row = QHBoxLayout(); self.session = QComboBox(); row.addWidget(self.session,1)
-        self.max_rig = QComboBox(); self.max_rig.addItem('普通骨骼','Generic'); self.max_rig.addItem('Biped','Biped'); self.max_rig.addItem('CAT','CAT'); row.addWidget(self.max_rig)
-        row.addWidget(self.button('连接说明',self.connection_help)); row.addWidget(self.button('刷新连接',self.refresh_sessions)); maxlayout.addLayout(row)
-        row = QHBoxLayout(); self.asset_name = QLineEdit(); self.asset_name.setPlaceholderText('保存名称，例如 Walk / Idle / 开心')
-        self.save_kind = QComboBox(); [self.save_kind.addItem(v,k) for k,v in KINDS.items()]
-        self.start = QSpinBox(); self.end = QSpinBox()
-        for spin in (self.start,self.end):spin.setRange(-100000,100000)
-        self.end.setValue(100)
-        row.addWidget(self.asset_name,1); row.addWidget(self.save_kind); row.addWidget(QLabel('起止帧')); row.addWidget(self.start); row.addWidget(self.end)
-        row.addWidget(self.button('保存当前选择',self.export_max)); maxlayout.addLayout(row)
-        maxlayout.addWidget(QLabel('选中角色根节点或完整角色；模型 / T-pose 取当前帧，Pose 导入到当前帧。双击列表导入所选 Max。'))
-        layout.addWidget(maxbox)
-        options = QGroupBox('Unity 与 GitHub'); form = QFormLayout(options)
-        row = QHBoxLayout(); self.unity = QLineEdit(self.settings.get('unity','')); row.addWidget(self.unity,1); row.addWidget(self.button('选择项目',self.choose_unity))
-        self.rig = QComboBox(); self.rig.addItems(['Generic','Humanoid']); row.addWidget(self.rig); form.addRow('Unity 项目',row)
-        row = QHBoxLayout(); self.remote = QLineEdit(self.settings.get('remote','')); self.remote.setPlaceholderText('https://github.com/账号/LXMaxAnimationLibrary.git'); row.addWidget(self.remote,1)
-        row.addWidget(self.button('初始化 Git LFS',self.init_git)); row.addWidget(self.button('拉取',lambda:self.sync('pull'))); row.addWidget(self.button('保存并推送',lambda:self.sync('push'))); form.addRow('资产仓库',row)
-        layout.addWidget(options)
-        self.status = QLabel('选择资产库开始。'); self.status.setWordWrap(True); self.status.setTextFormat(Qt.TextFormat.PlainText); self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse); layout.addWidget(self.status)
-        self.timer = QTimer(self); self.timer.setInterval(1000); self.timer.timeout.connect(self.poll); self.timer.start()
-        if self.root.text(): self.load_library(self.root.text())
-        self.refresh_sessions()
+        self.setStyleSheet('QWidget#LXAnimation {background:#f7f9f3;color:#293b2b;} QGroupBox {border:1px solid #dbe5d1;border-radius:8px;margin-top:14px;padding-top:12px;} QGroupBox::title {subcontrol-origin:margin;left:10px;} QPushButton {padding:8px 12px;border:1px solid #c7d7b4;border-radius:6px;background:#edf3e5;color:#35512b;} QPushButton:hover {background:#dcebc9;} QLineEdit,QComboBox,QDoubleSpinBox,QPlainTextEdit {background:white;border:1px solid #d6dfcf;border-radius:5px;padding:6px;} QTreeWidget {background:white;border:1px solid #dbe5d1;border-radius:7px;} QTreeWidget::item {padding:7px;}')
+        outer=QVBoxLayout(self);outer.setContentsMargins(14,10,14,10)
+        row=QHBoxLayout();self.avatar=QLabel();self.avatar.setFixedSize(58,58);row.addWidget(self.avatar)
+        title=QVBoxLayout();self.character_title=QLabel('选择一个角色');self.character_title.setStyleSheet('font-size:22px;font-weight:650');title.addWidget(self.character_title)
+        title.addWidget(QLabel('角色 · 动画 · Pose · Clip'));row.addLayout(title,1)
+        row.addWidget(self.button('角色库',self.open_gallery));row.addWidget(self.button('资产库 / 同步',self.library_settings));outer.addLayout(row)
+        row=QHBoxLayout();self.connection=QLabel('尚未连接 Max');self.connection.setWordWrap(True);row.addWidget(self.connection,1)
+        row.addWidget(self.button('连接 Max',self.connect_max));row.addWidget(self.button('断开',self.disconnect));row.addWidget(self.button('连接脚本',self.connection_help));outer.addLayout(row)
+        split=QSplitter();outer.addWidget(split,1)
+        left=QWidget();leftbox=QVBoxLayout(left);leftbox.setContentsMargins(0,8,8,0)
+        row=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText('搜索动画 / Pose / 备注');self.search.textChanged.connect(lambda:self.guard(self.refresh_assets))
+        self.kind=QComboBox();self.kind.addItem('全部','');[self.kind.addItem(v,k) for k,v in KINDS.items()];self.kind.currentIndexChanged.connect(lambda:self.guard(self.refresh_assets))
+        row.addWidget(self.search,1);row.addWidget(self.kind);leftbox.addLayout(row)
+        self.assets=QTreeWidget();self.assets.setHeaderLabels(['名称','类型','版本','备注']);self.assets.setRootIsDecorated(False);self.assets.setSortingEnabled(True);self.assets.sortItems(0,Qt.SortOrder.AscendingOrder)
+        self.assets.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch);self.assets.header().setSectionResizeMode(3,QHeaderView.ResizeMode.Stretch)
+        self.assets.setColumnWidth(1,95);self.assets.setColumnWidth(2,65)
+        self.assets.currentItemChanged.connect(self.asset_changed);self.assets.itemDoubleClicked.connect(lambda *_:self.guard(lambda:self.send_to_max(self.selected_asset())))
+        leftbox.addWidget(self.assets,1)
+        row=QHBoxLayout();row.addWidget(self.button('从 Max 导入动画',lambda:self.capture('animation')));row.addWidget(self.button('保存单帧 Pose',lambda:self.capture('pose')));leftbox.addLayout(row)
+        row=QHBoxLayout();self.save_button=self.button('从 Max 保存所选资产',self.overwrite);row.addWidget(self.save_button);row.addWidget(self.button('修改名称 / 备注',self.edit_metadata));row.addWidget(self.button('刷新',self.refresh_assets));leftbox.addLayout(row)
+        hint=QLabel('双击动画替换 Max 当前场景；双击 Pose 应用到当前帧并打键。\nMax 保存不写回库，只有明确导入 / 覆盖才更新库。');hint.setWordWrap(True);leftbox.addWidget(hint)
+        split.addWidget(left)
+        right=QWidget();rightbox=QVBoxLayout(right);rightbox.setContentsMargins(8,8,0,0)
+        self.editor=ClipEditor();self.editor.message.connect(self.set_status);rightbox.addWidget(self.editor,1)
+        footer=QHBoxLayout();footer.addWidget(QLabel('Unity 导出与后处理接口：后续接入'),1);button=QPushButton('导出到 Unity · 暂未接入');button.setEnabled(False);footer.addWidget(button);rightbox.addLayout(footer)
+        split.addWidget(right);split.setSizes([490,560]);split.setChildrenCollapsible(False)
+        self.status=QLabel('先连接 Max，再从角色库导入 T-pose。');self.status.setWordWrap(True);self.status.setTextFormat(Qt.TextFormat.PlainText);self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse);outer.addWidget(self.status)
+        path=self.settings.get('library') or str(context.data_root/'library')
+        self.guard(lambda:self.load_library(path))
+        self.active_session=self.settings.get('session')
+        self.timer=QTimer(self);self.timer.setInterval(750);self.timer.timeout.connect(self.poll);self.timer.start();self.poll()
 
-    def button(self, name, callback):
-        button = QPushButton(name)
-        button.clicked.connect(lambda checked=False:self.guard(callback))
-        return button
-
-    def guard(self, callback):
-        try:return callback()
-        except Exception as exc:self.status.setText('操作失败：' + str(exc))
-
+    def button(self,title,fn):
+        b=QPushButton(title);b.clicked.connect(lambda _:self.guard(fn));return b
+    def guard(self,fn):
+        try:return fn()
+        except Exception as exc:self.set_status('操作失败：'+str(exc))
+    def set_status(self,text):
+        if not self.closed:self.status.setText(str(text))
+    def busy(self):return self.pending is not None or any(j.isRunning() for j in self.jobs)
+    def idle(self):
+        if self.busy():raise ValueError('当前任务尚未完成，请等待。')
     def persist(self):
-        self.settings.update(library=self.root.text(),unity=self.unity.text(),remote=self.remote.text())
+        self.settings.update(character=self.active_character,session=self.active_session)
+        if self.library:self.settings['library']=str(self.library.root)
         self.context.save_settings(self.settings)
-
-    def run_job(self, callback, message, completed=None):
-        if any(job.isRunning() for job in self.jobs):
-            raise ValueError('正在执行文件 / Git 操作，请等待完成。')
-        self.status.setText(message)
-        job = Job(callback,self); self.jobs.append(job)
-        def done(value,error):
+    def run_job(self,fn,label,done=None):
+        if any(j.isRunning() for j in self.jobs):raise ValueError('文件操作进行中，请等待。')
+        self.set_status(label);job=Job(fn,self);self.jobs.append(job)
+        def completed(value,error):
             if self.closed:return
-            if error:self.status.setText('操作失败：'+error)
-            else:
-                self.status.setText(str(value) if isinstance(value,str) else '操作完成。')
-                if completed:self.guard(lambda:completed(value))
-        job.done.connect(done); job.start()
-
+            if error:self.set_status('操作失败：'+error)
+            elif done:self.guard(lambda:done(value))
+            else:self.set_status(str(value))
+        job.done.connect(completed);job.start()
     def require_library(self):
-        if not self.library:raise ValueError('请先选择资产库。')
+        if not self.library:raise ValueError('请先设置资产库。')
         return self.library
-
-    def character(self):
+    def selected_session(self):
+        matches=[s for s in host.sessions() if s['directory']==self.active_session]
+        if not matches:raise ValueError('请连接一个 Max 窗口。')
+        if matches[0].get('protocol',1)<2:raise ValueError('Max 连接脚本需要更新，请重新运行本工具的连接脚本。')
+        return matches[0]
+    def character_info(self):
         self.require_library()
-        item = self.characters.currentItem()
-        if not item:raise ValueError('请先选择或创建角色。')
-        return item.text()
-
+        if not self.active_character:raise ValueError('请先从角色库导入并选择角色。')
+        info=self.library.character_info(self.active_character)
+        if not info['tpose']:raise ValueError('此旧版角色没有 T-pose，请在角色库更新。')
+        return info
     def selected_asset(self):
-        self.require_library()
-        item = self.assets.currentItem()
+        item=self.assets.currentItem()
         if not item:raise ValueError('请先选择一项资产。')
         return item.data(0,Qt.ItemDataRole.UserRole)
-
-    def selected_session(self):
-        session = self.session.currentData()
-        if not session:raise ValueError('未连接 Max，请查看连接说明。')
-        return session
-
-    def choose_library(self):
-        if self.pending or any(j.isRunning() for j in self.jobs):raise ValueError('操作进行中，请完成后切换资产库。')
-        path = QFileDialog.getExistingDirectory(self,'选择 / 新建资产库',self.root.text())
-        if path:self.load_library(path)
-
-    def load_library(self, path):
-        library = Library(path); library.initialize(); self.library = library
-        self.root.setText(str(library.root)); self.persist()
-        self.characters.clear(); self.characters.addItems(library.characters())
-        if self.characters.count():self.characters.setCurrentRow(0)
-        self.refresh_assets(); self.status.setText('资产库已就绪。')
-
-    def add_character(self):
-        library = self.require_library()
-        name,ok = QInputDialog.getText(self,'新建角色','角色名')
-        if ok:
-            library.create_character(name); self.characters.addItem(name.strip()); self.characters.setCurrentRow(self.characters.count()-1)
-
-    def refresh_assets(self,*_):
+    def load_library(self,path):
+        self.editor.flush();self.library=Library(path);self.library.initialize()
+        names=self.library.characters();previous=self.settings.get('character')
+        self.active_character=previous if previous in names else (names[0] if names else None)
+        self.editor.set_asset(None,None);self.update_character_header();self.refresh_assets(flush=False);self.persist()
+    def update_character_header(self):
+        icon=self.context.resource('.lxtool/icon.png');self.character_title.setText(self.active_character or '选择一个角色')
+        if self.active_character:
+            info=self.library.character_info(self.active_character)
+            if info.get('avatar'):
+                target=contained(self.library.root/'characters'/self.active_character,info['avatar'])
+                if target.is_file():icon=target
+        self.avatar.setPixmap(QPixmap(str(icon)).scaled(58,58,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
+    def choose_character(self,name):
+        self.idle();self.editor.flush();self.active_character=name;self.editor.set_asset(None,None)
+        self.update_character_header();self.refresh_assets(flush=False);self.persist()
+    def open_gallery(self):
+        self.require_library()
+        if self.gallery is None:
+            self.gallery=CharacterDialog(self)
+        self.gallery.reload_categories();self.gallery.show();self.gallery.raise_();self.gallery.activateWindow()
+    def refresh_assets(self,*_,flush=True,select_id=None):
         if not self.library:return
-        self.assets.clear()
-        character = self.characters.currentItem()
-        if not character:return
-        assets,errors = self.library.list_assets(character.text(),self.search.text(),self.kind.currentData())
-        for asset in assets:
-            item = QTreeWidgetItem([asset['name'],KINDS[asset['kind']],asset['revision'],asset.get('notes','')])
-            item.setData(0,Qt.ItemDataRole.UserRole,asset); self.assets.addTopLevelItem(item)
-        self.status.setText(f'{len(assets)} 项资产。' + (' 索引错误：'+'; '.join(errors) if errors else ''))
-
-    def refresh_sessions(self):
-        current = self.session.currentData(); self.session.clear()
-        for session in host.sessions():
-            self.session.addItem(f"Max {session.get('version','')} · PID {session['pid']} · {session.get('scene','未命名')}",session)
-            if current and current['directory'] == session['directory']:self.session.setCurrentIndex(self.session.count()-1)
-
+        if flush:self.editor.flush()
+        if not select_id and self.assets.currentItem():select_id=self.selected_asset()['id']
+        self.restoring=True;self.assets.setSortingEnabled(False);self.assets.clear()
+        data,errors=self.library.list_assets(self.active_character) if self.active_character else ([],[])
+        versions={}
+        for asset in sorted(data,key=lambda a:a['created']):
+            key=(asset['kind'],asset['name']);versions[key]=versions.get(key,0)+1;asset['_displayVersion']=versions[key]
+        chosen=None
+        for asset in data:
+            if self.kind.currentData() and asset['kind']!=self.kind.currentData():continue
+            if self.search.text().casefold() not in (asset['name']+' '+asset.get('notes','')).casefold():continue
+            item=QTreeWidgetItem([asset['name'],KINDS[asset['kind']],f"v{asset['_displayVersion']:03d}",asset.get('notes','')]);item.setToolTip(2,asset['revision']);item.setData(0,Qt.ItemDataRole.UserRole,asset)
+            self.assets.addTopLevelItem(item)
+            if asset['id']==select_id:chosen=item
+        self.assets.setSortingEnabled(True)
+        if chosen:self.assets.setCurrentItem(chosen)
+        self.restoring=False
+        asset=chosen.data(0,Qt.ItemDataRole.UserRole) if chosen else None
+        self.editor.set_asset(self.library,asset)
+        if errors:self.set_status('索引异常：'+'; '.join(errors))
+    def asset_changed(self,item,old):
+        if self.restoring:return
+        try:self.editor.flush()
+        except Exception as exc:
+            self.set_status(str(exc));self.restoring=True;self.assets.setCurrentItem(old);self.restoring=False;return
+        self.guard(lambda:self.editor.set_asset(self.library,item.data(0,Qt.ItemDataRole.UserRole) if item else None))
+    def connect_max(self):
+        self.idle();available=host.sessions()
+        if not available:self.connection_help();return
+        dialog=QDialog(self);dialog.setWindowTitle('选择唯一连接的 Max 窗口');layout=QVBoxLayout(dialog);combo=QComboBox()
+        for session in available:combo.addItem(f"PID {session['pid']} · {session.get('scene') or '未命名场景'}",session['directory'])
+        layout.addWidget(combo);buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel);buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);layout.addWidget(buttons)
+        if dialog.exec():self.active_session=combo.currentData();self.persist();self.poll()
+    def disconnect(self):self.idle();self.active_session=None;self.persist();self.poll()
     def connection_help(self):
-        script = self.context.resource('max/bootstrap.ms')
-        QMessageBox.information(self,'连接当前 Max',f'在需要操作的 3ds Max 中，选择 Scripting → Run Script，运行：\n\n{script}\n\n连接仅作用于该实例；关闭此面板不会关闭 Max。')
-
-    def import_file(self):
-        character = self.character()
-        path,_ = QFileDialog.getOpenFileName(self,'登记 FBX','','FBX (*.fbx)')
-        if not path:return
-        kind,ok = QInputDialog.getItem(self,'资产类型','登记为',['动画','模型 / T-pose'],0,False)
-        if not ok:return
-        library=self.library
-        self.run_job(lambda:library.import_fbx(character,Path(path).stem,'animation' if kind=='动画' else 'model',path),'正在登记 FBX…',lambda _:self.refresh_assets())
-
-    def import_max(self):
-        if self.pending:raise ValueError('已有宿主任务等待回执，请等待完成。')
-        asset = self.selected_asset(); session = self.selected_session(); library = self.library
+        script=self.context.resource('max/bootstrap.ms')
+        QMessageBox.information(self,'连接 Max',f'在需要连接的 Max 窗口中，通过 Scripting → Run Script 运行：\n\n{script}\n\n随后点击“连接 Max”选择该窗口。一次只绑定一个窗口。')
+    def capture(self,kind,update=None,replace=None):
+        self.idle();library=self.require_library();session=self.selected_session();self.editor.flush()
+        info=self.character_info() if kind!='model' else None
+        dialog=CaptureDialog(self,kind,update)
+        if replace:dialog.name.setText(replace['name']);dialog.notes.setText(replace.get('notes',''))
+        if not replace and not dialog.exec():return
+        name=dialog.name.text().strip();character=name if kind=='model' else self.active_character
+        if kind=='model' and not update and any(c.casefold()==name.casefold() for c in library.characters()):raise ValueError('角色已存在，请使用更新 T-pose。')
+        stage=library.stage()
+        args={'directory':str(stage),'kind':kind,'rig':dialog.rig.currentText() if kind=='model' else info.get('rig','Generic'),
+              'sceneRange':True,'includeTextures':dialog.textures.isChecked(),'captureAvatar':kind=='model' and dialog.avatar.isChecked()}
+        if info:
+            args['includeTextures']=bool(info['tpose']['metadata'].get('includeTextures',False))
+            expected=info['tpose']['metadata'].get('signature')
+            if not expected:raise ValueError('角色缺少完整场景清单，请先在角色库更新 T-pose。')
+            args['expected']=expected
+        else:args['strictSelection']=True
+        result=host.request(session,'export',**args)
+        self.pending={'result':str(result),'time':time.time(),'stage':stage,'kind':kind,'name':name,'character':character,'category':dialog.category.currentData() or '',
+                      'update':bool(update),'notes':dialog.notes.text(),'replace':replace,'session':session['directory'],'type':'export'}
+        self.set_status('正在读取所连接 Max 的当前场景…')
+    def overwrite(self):
+        asset=self.selected_asset()
+        if asset['kind']=='model':self.capture('model',update=self.active_character)
+        else:self.capture(asset['kind'],replace=asset)
+    def send_to_max(self,asset):
+        self.idle();self.editor.flush();session=self.selected_session();library=self.library
         def ready(path):
-            result = host.request(session,'import',path=str(path),kind=asset['kind'],rig=self.max_rig.currentData())
-            self.pending[str(result)] = {'type':'import','time':time.time()}
-            self.status.setText('已提交给 Max，等待执行结果…')
-        self.run_job(lambda:library.verify(asset),'正在校验资产…',ready)
-
-    def export_max(self):
-        if self.pending or any(j.isRunning() for j in self.jobs):raise ValueError('已有任务进行中，请等待完成。')
-        from .library import safe_name
-        character = self.character(); session = self.selected_session()
-        name=safe_name(self.asset_name.text()); kind=self.save_kind.currentData()
-        if self.start.value()>self.end.value():raise ValueError('起始帧不能大于结束帧。')
-        stage = self.library.stage()
-        result=host.request(session,'export',directory=str(stage),kind=kind,rig=self.max_rig.currentData(),start=self.start.value(),end=self.end.value())
-        self.pending[str(result)]={'type':'export','time':time.time(),'stage':stage,'character':character,'name':name,'kind':kind}
-        self.status.setText('Max 正在保存选择集…')
-
-    def choose_unity(self):
-        path=QFileDialog.getExistingDirectory(self,'选择 Unity / 团结项目',self.unity.text())
-        if path:self.unity.setText(path); self.persist()
-
-    def import_unity(self):
-        if self.pending:raise ValueError('已有宿主任务等待回执，请等待完成。')
-        asset=self.selected_asset(); library=self.library; project=self.unity.text(); rig=self.rig.currentText()
-        if not project:raise ValueError('请先选择 Unity 项目。')
-        receiver=self.context.resource('unity/LXMaxAnimationReceiver.cs'); self.persist()
-        def ready(result):
-            self.pending[str(result)]={'type':'unity','time':time.time()}
-            self.status.setText('资产和接收器已送入项目，等待 Unity 编辑器导入回执（请打开该项目）。')
-        self.run_job(lambda:host.send_unity(library,asset,project,receiver,rig),'正在复制资产至 Unity…',ready)
-
-    def init_git(self):
-        library=self.require_library(); remote=self.remote.text().strip(); self.persist()
-        self.run_job(lambda:host.init_git(library.root,remote),'正在初始化 Git LFS…')
-
-    def sync(self,operation):
-        if self.pending:raise ValueError('请等待宿主保存完成后再同步。')
-        library=self.require_library()
-        self.run_job(lambda:host.sync_git(library.root,operation),'正在同步 GitHub…',lambda _:self.load_library(str(library.root)))
-
+            result=host.request(session,'import',path=str(path),kind=asset['kind'],rig=asset.get('metadata',{}).get('rig','Generic'))
+            self.pending={'result':str(result),'time':time.time(),'type':'import','session':session['directory']}
+            self.set_status('正在替换 Max 当前场景…' if asset['kind']=='animation' else '正在向 Max 应用资产…')
+        self.run_job(lambda:library.verify(asset),'正在校验库文件…',ready)
+    def edit_metadata(self):
+        self.idle();asset=self.selected_asset();dialog=QDialog(self);dialog.setWindowTitle('修改资产信息');form=QFormLayout(dialog)
+        name=QLineEdit(asset['name']);notes=QLineEdit(asset.get('notes',''));form.addRow('名称',name);form.addRow('备注',notes)
+        buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel);buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);form.addRow(buttons)
+        if dialog.exec():
+            from .library import safe_name,write_json
+            path=contained(self.library.root,Path(asset['_directory']).relative_to(self.library.root))/'asset.json'
+            data=read_json(path);data.update(name=safe_name(name.text()),notes=notes.text());write_json(path,data);self.refresh_assets()
+    def library_settings(self):
+        self.idle();self.editor.flush();dialog=QDialog(self);dialog.setWindowTitle('资产库与同步');dialog.resize(650,200);form=QFormLayout(dialog)
+        row=QHBoxLayout();path=QLineEdit(str(self.library.root) if self.library else '');row.addWidget(path,1)
+        def browse():
+            value=QFileDialog.getExistingDirectory(dialog,'选择资产库',path.text())
+            if value:path.setText(value)
+        row.addWidget(self.button('选择目录',browse));form.addRow('本地目录',row)
+        remote=QLineEdit(self.settings.get('remote',''));form.addRow('GitHub 仓库',remote)
+        def apply():
+            self.settings['remote']=remote.text().strip();self.load_library(path.text());dialog.accept()
+        form.addRow(self.button('应用目录',apply));row=QHBoxLayout()
+        def sync(operation):
+            if Path(path.text()).resolve()!=self.library.root:raise ValueError('请先应用目录。')
+            self.settings['remote']=remote.text().strip();self.persist();dialog.accept();library=self.library
+            fn=(lambda:host.init_git(library.root,self.settings['remote'])) if operation=='init' else (lambda:host.sync_git(library.root,operation))
+            self.run_job(fn,'正在同步资产库…',lambda message:(self.refresh_assets(),self.set_status(message)))
+        for title,operation in [('初始化 Git LFS','init'),('拉取','pull'),('保存并推送','push')]:row.addWidget(self.button(title,lambda operation=operation:sync(operation)))
+        form.addRow(row);dialog.exec()
     def poll(self):
-        for file,pending in list(self.pending.items()):
-            path=Path(file)
-            if path.exists():
-                del self.pending[file]
-                def consume():
-                    result=read_json(path)
-                    if not result.get('ok'):raise RuntimeError(result.get('message','宿主操作失败'))
-                    if pending['type']=='export':
-                        library=self.library
-                        def publish():
-                            asset=library.publish(pending['character'],pending['name'],pending['kind'],pending['stage'],result['main'],metadata=result.get('metadata',{}))
-                            shutil.rmtree(pending['stage'])
-                            return asset
-                        self.run_job(publish,'正在校验并归档…',lambda _:self.refresh_assets())
-                    else:self.status.setText(result.get('message','完成。'))
-                self.guard(consume)
-            elif time.time()-pending['time']>180:
-                del self.pending[file]
-                self.status.setText('未收到宿主回执。请检查 Max / Unity；不要立即重复操作，原任务可能仍在执行。临时文件已保留。')
-
+        if self.closed:return
+        matches=[s for s in host.sessions() if s['directory']==self.active_session]
+        if matches:
+            session=matches[0];self.connection.setText(f"● Max · PID {session['pid']} · {Path(session.get('scene') or '未命名场景').name}  |  {session.get('start','?')} — {session.get('end','?')} 帧 · {session.get('fps','?')} FPS · 当前 {session.get('frame','?')}")
+        else:self.connection.setText('○ Max 未连接' if not self.active_session else '○ Max 连接已断开；不会自动切换到其他窗口')
+        pending=self.pending
+        if not pending:return
+        path=Path(pending['result'])
+        if path.exists():
+            self.pending=None
+            def consume():
+                result=read_json(path)
+                if not result.get('ok'):raise ValueError(result.get('message','Max 操作失败'))
+                if pending['type']=='import':self.set_status(result.get('message','完成。'));return
+                library=self.library
+                def publish():
+                    if pending['kind']=='model':asset=library.import_character(pending['character'],pending['stage'],result['main'],result['metadata'],pending['category'],pending['update'])
+                    else:asset=library.publish(pending['character'],pending['name'],pending['kind'],pending['stage'],result['main'],pending['notes'],result['metadata'])
+                    if pending['replace']:
+                        warning=library.mark_superseded(pending['replace'],asset)
+                        if warning:result.setdefault('warnings',[]).append(warning)
+                    shutil.rmtree(pending['stage']);return asset
+                def finished(asset):
+                    self.active_character=pending['character'];self.editor.set_asset(None,None);self.update_character_header();self.refresh_assets(flush=False,select_id=asset['id']);self.persist()
+                    if self.gallery:self.gallery.reload_categories()
+                    self.set_status('已更新库。'+(' · '+'; '.join(result.get('warnings',[])) if result.get('warnings') else ''))
+                self.run_job(publish,'正在归档 Max 场景与配置…',finished)
+            self.guard(consume)
+        elif time.time()-pending['time']>180:self.set_status('Max 尚未返回结果，仍在等待；不会重复提交或切换窗口。')
     def shutdown(self):
         if self.closed:return
-        self.closed=True; self.timer.stop()
-        # Keep running jobs alive independently until bounded I/O finishes.
+        try:self.editor.flush()
+        except Exception:
+            if self.editor.data:
+                from .library import write_json
+                write_json(self.context.data_root/'clip-recovery.json',{'assetId':self.editor.asset['id'],'lastValid':self.editor.data,'name':self.editor.name.text(),'firstFrame':self.editor.first.value(),'lastFrame':self.editor.last.value(),'extraText':self.editor.extra.toPlainText()})
+        self.closed=True;self.timer.stop()
+        if self.gallery:self.gallery.close()
         for job in self.jobs:
-            if job.isRunning():
-                job.setParent(None)
-                _finishing_jobs.append(job)
-                job.finished.connect(lambda j=job:_release_job(j))
+            if job.isRunning():job.setParent(None);_finishing.append(job);job.finished.connect(lambda j=job:_release(j))
 
-
-_finishing_jobs=[]
-def _release_job(job):
-    if job in _finishing_jobs:_finishing_jobs.remove(job)
+_finishing=[]
+def _release(job):
+    if job in _finishing:_finishing.remove(job)
     job.deleteLater()
 
-def create_panel(context,parent):
-    return Panel(context,parent)
+def create_panel(context,parent):return Panel(context,parent)
