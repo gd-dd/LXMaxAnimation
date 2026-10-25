@@ -24,8 +24,8 @@
 - [x] 独立 Max 2026.3：Biped 36 对象与 CAT 2 对象 Pose / 动画，无选择保存与场景清单不变
 - [x] 文档、JSON 契约及版本边界
 - [x] 最终摘要 / 包生成校验（14 个运行文件，开发包已生成）
-- [ ] GitHub 默认分支推送并通过开发商店真实安装
-- [ ] 完成后执行关机
+- [x] GitHub 默认分支推送并通过开发商店真实安装（local-data/development-verification.json）
+- 关机在会话最终验证结束后执行，不提前终止构建和检查。
 - [ ] 真实生产角色人工验收（用户休息，保留待验收，不代签）
 
 ## 验证命令与证据
@@ -38,3 +38,5 @@
 - `scripts/build_package.py` 与 lx-tool-creator/validate_tool.py：14 个运行文件通过。
 
 开发版本维持 0.0.0，不创建正式 Release。其他 Max / Unity 版本、复杂第三方控制器和生产角色未实测。Unity 新配置尚未执行导入；历史接收器测试不代表本轮配置已接入。
+
+最终自查：CAT 测试原先使用无效的位置属性，已改为变换矩阵并增加非零位移断言。最终批处理日志为 Task Completed Successfully；Biped / CAT 均通过，避免空动作假阳性。

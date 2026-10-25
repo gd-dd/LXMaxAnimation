@@ -23,13 +23,16 @@ for rig in ['Biped','CAT']:
             node.CATMode=1
             hub=node.RootHub.node
             with pymxs.animate(True):
-                with pymxs.attime(0):hub.position=rt.point3(0,0,50)
-                with pymxs.attime(10):hub.position=rt.point3(20,0,50)
+                with pymxs.attime(0):
+                    tm=hub.transform;tm.row4=rt.point3(0,0,50);hub.transform=tm
+                with pymxs.attime(10):
+                    tm=hub.transform;tm.row4=rt.point3(20,0,50);hub.transform=tm
         rt.select(list(rt.objects));rt.sliderTime=5
         signature=bridge['scene_signature'](list(rt.objects))
         rt.clearSelection()
         target=node if rig=='Biped' else hub
         expected=[float(target.transform[3][i]) for i in range(3)]
+        assert abs(expected[0]-10)<0.1,(rig,expected)
         pose=output/(rig+'-pose');pose.mkdir()
         saved=bridge['export_asset']({'kind':'pose','rig':rig,'directory':str(pose),'expected':signature})
         rt.sliderTime=20

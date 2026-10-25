@@ -135,11 +135,13 @@ def capture_tracks(node):
             if 'material' in label.lower():continue
             current=path+[i];names=labels+[label]
             try:
-                ctrl=sub.controller;value=sub.value;cls=str(rt.classOf(ctrl)) if ctrl else ''
+                ctrl=sub.controller;cls=str(rt.classOf(ctrl)) if ctrl else ''
                 # Procedural and constraint outputs are driven by their controls;
                 # write only key-based scalar tracks, preserving their controllers.
-                if cls.lower() in ('bezier_float','linear_float','tcb_float','boolean_controller') and isinstance(value,(float,int,bool)):
-                    tracks.append({'path':current,'labels':names,'controller':cls,'value':value})
+                if cls.lower() in ('bezier_float','linear_float','tcb_float','boolean_controller'):
+                    value=sub.value
+                    if isinstance(value,(float,int,bool)):
+                        tracks.append({'path':current,'labels':names,'controller':cls,'value':value})
             except Exception:pass
             visit(sub,current,names,depth+1)
     visit(node,[],[],0)

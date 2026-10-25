@@ -24,6 +24,6 @@
     "ui/fbx_settings.py": "1cc4bc3d41e8144166fc919e46d36668f0072c1e3136c75944adf1c0f6dc65fe",
     "ui/unity-schema.json": "abe76da07ee01974a15813d9a64984714a6f5b5792f56dddf6e2520bda9c38b7",
     "max/bootstrap.ms": "4d571cdb39f236f9fe460213246d7b962948c9efe9eebe7792ca4a43aa3f6a53",
-    "max/bridge.py": "dd62be4eba1737812ceb444373a65fbcad0b677ee44a09378a0dde63ff55ed89"
+    "max/bridge.py": "a64dc251d9612ebac71d507a4a6b80e63446b065d465219baa5b836243924dff"
   }
 }
