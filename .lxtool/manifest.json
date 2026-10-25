@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 2,
+  "kind": "lx-tool",
+  "name": "LXMaxAnimation",
+  "description": "按角色管理 Max 模型、动画和 Pose，一键导入 Unity，同步私有 GitHub 资产库。",
+  "version": "0.0.0",
+  "category": "动画管线",
+  "icon": ".lxtool/icon.png",
+  "readme": ".lxtool/README.md",
+  "panel": ".lxtool/panel.json",
+  "applications": {},
+  "actions": {},
+  "files": {
+    ".lxtool/icon.png": "7a100cb728acb642ab228373a4bff7475b3704aafbcad7863531322217bebfd2",
+    ".lxtool/README.md": "ff9f5d791c18d316c93da7aca0eff76016106b2f7f7a635893dd5d6cd2f6eb1c",
+    ".lxtool/panel.json": "8dbce71d0ca9feb12cbf3d05b82693b3f8c7254a05f0ed91a305a8c0fb31cdd2",
+    "ui/__init__.py": "832ba713741f115fd0f348ffeb5a036e7530f4a6702e2dd341b135f0d17c6b5a",
+    "ui/library.py": "b7cb99b7ad2e03a45354e63efe0899dd76c95c69e1f16a06de74abedccd90c79",
+    "ui/integrations.py": "ee20194e3631f627974be5436f9bd37eaee7f8290fcead1c330d2c2c3ebc269f",
+    "ui/panel.py": "8465bd2eccd26cd89ba5233583c22f1fb7c90f93185d6e5ab0cb1ba91cfaf17a",
+    "max/bootstrap.ms": "4d571cdb39f236f9fe460213246d7b962948c9efe9eebe7792ca4a43aa3f6a53",
+    "max/bridge.py": "0d9ec64aae6fb32afed1c491412393fea5f12d2a01f04994128d95b55bec2f11",
+    "unity/LXMaxAnimationReceiver.cs": "081ec6fd545a4aaa423108712fddc87a972df59446a1eff8e93ba2b5abed5a34"
+  }
+}
