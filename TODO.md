@@ -46,7 +46,7 @@
 - [x] Clip 表格内编辑名称、范围、备注、源 Take，双向 Loop Time 快捷开关
 - [x] 配置双页签，FBX 四子页签，固定目标编辑器及预设底栏
 - [x] 左侧延迟单击编辑与双击加载互不冲突，精简按钮与灰色空状态
-- [ ] 顶部启动 Max 并按 PID 自动连接；验证实际宿主启动
-- [ ] UI 回归、包校验、GitHub 开发快照和内嵌验证
+- [x] 顶部启动 Max 并按 PID 自动连接；实际启动 Max 2026（PID 18536），local-data/max-launch-result.json
+- [x] UI 回归、15 文件包校验、GitHub 开发快照下载和内嵌验证（local-data/development-verification.json）
 
 UI 本轮证据：20 项单元测试通过；真实 Qt 事件测试覆盖聚焦参数滚轮、表格双击、Loop 同步、非法帧回退、左侧延迟编辑与双击加载、灰显与滚动容器结构。飞书链接浏览服务超时，未读取正文，以用户聊天需求为准。
