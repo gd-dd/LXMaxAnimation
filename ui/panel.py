@@ -33,7 +33,28 @@ class Panel(QWidget):
             QWidget#ClipWorkspace[empty="true"] {background:#ffffff;}
             QWidget#SettingsBody {background:#ffffff;}
             QWidget:disabled {color:#9ca595;}
-            QLineEdit,QComboBox,QDoubleSpinBox,QSpinBox,QPlainTextEdit {background:#fff;border:1px solid #d6dfcf;border-radius:5px;padding:5px;}
+            QLineEdit,QComboBox,QDoubleSpinBox,QSpinBox,QPlainTextEdit {
+                background:#fcfdf9;color:#33442c;border:1px solid #d5dfca;border-radius:8px;padding:7px 11px;
+                selection-background-color:#dcebc6;selection-color:#2c421d;}
+            QLineEdit:hover,QComboBox:hover,QDoubleSpinBox:hover,QSpinBox:hover,QPlainTextEdit:hover {border-color:#aabc91;}
+            QLineEdit:focus,QComboBox:focus,QDoubleSpinBox:focus,QSpinBox:focus,QPlainTextEdit:focus {background:#fff;border:1px solid #86a857;}
+            QLineEdit,QComboBox,QDoubleSpinBox,QSpinBox {min-height:20px;}
+            QComboBox {padding-right:36px;}
+            QComboBox::drop-down {subcontrol-origin:padding;subcontrol-position:top right;width:30px;
+                border:0;border-left:1px solid #e0e7d6;border-top-right-radius:7px;border-bottom-right-radius:7px;background:#eef4e5;}
+            QComboBox::drop-down:hover {background:#e0edce;}
+            QComboBox::down-arrow {image:url("__ICONS__/chevron-down.svg");width:12px;height:12px;}
+            QComboBox QAbstractItemView {background:#fcfdf9;color:#33442c;border:1px solid #b8cba0;
+                padding:5px;outline:0;selection-background-color:#e2edcf;selection-color:#304620;}
+            QComboBox QAbstractItemView::item {min-height:28px;padding:4px 9px;}
+            QDoubleSpinBox,QSpinBox {padding-right:31px;}
+            QDoubleSpinBox::up-button,QSpinBox::up-button {subcontrol-origin:border;subcontrol-position:top right;
+                width:27px;border:0;border-left:1px solid #e0e7d6;border-top-right-radius:7px;background:#eef4e5;}
+            QDoubleSpinBox::down-button,QSpinBox::down-button {subcontrol-origin:border;subcontrol-position:bottom right;
+                width:27px;border:0;border-left:1px solid #e0e7d6;border-bottom-right-radius:7px;background:#eef4e5;}
+            QDoubleSpinBox::up-button:hover,QSpinBox::up-button:hover,QDoubleSpinBox::down-button:hover,QSpinBox::down-button:hover {background:#e0edce;}
+            QDoubleSpinBox::up-arrow,QSpinBox::up-arrow {image:url("__ICONS__/chevron-up.svg");width:10px;height:10px;}
+            QDoubleSpinBox::down-arrow,QSpinBox::down-arrow {image:url("__ICONS__/chevron-down.svg");width:10px;height:10px;}
             QLineEdit:disabled,QComboBox:disabled,QDoubleSpinBox:disabled,QSpinBox:disabled,QPlainTextEdit:disabled {background:#fff;color:#9ca595;}
             QPushButton,QToolButton {padding:7px 10px;border:1px solid #ccd9bf;border-radius:6px;background:#edf3e5;color:#35512b;}
             QPushButton:hover,QToolButton:hover {background:#dcebc9;border-color:#a7bd8f;}
@@ -54,7 +75,7 @@ class Panel(QWidget):
             QScrollArea {border:0;background:transparent;}
             QScrollBar:vertical {width:10px;background:#f0f3eb;}
             QScrollBar::handle:vertical {background:#b5c5a5;border-radius:4px;min-height:24px;}
-        """)
+        """.replace('__ICONS__',(Path(__file__).parent/'icons').as_posix()))
         outer=QVBoxLayout(self);outer.setContentsMargins(14,10,14,10)
         row=QHBoxLayout();self.avatar=QLabel();self.avatar.setFixedSize(58,58);row.addWidget(self.avatar)
         title=QVBoxLayout();self.character_title=QLabel('选择一个角色');self.character_title.setStyleSheet('font-size:22px;font-weight:650');title.addWidget(self.character_title)
