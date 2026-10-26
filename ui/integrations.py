@@ -9,6 +9,33 @@ import uuid
 from urllib.request import getproxies
 from .library import write_json, read_json, contained
 
+def max_installations():
+    """Discover installed hosts without embedding a machine-specific path in the package."""
+    candidates=set()
+    if os.name=='nt':
+        import winreg
+        for view in (winreg.KEY_WOW64_64KEY,winreg.KEY_WOW64_32KEY):
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,r'SOFTWARE\Autodesk\3dsMax',0,winreg.KEY_READ|view) as root:
+                    for i in range(winreg.QueryInfoKey(root)[0]):
+                        with winreg.OpenKey(root,winreg.EnumKey(root,i)) as key:
+                            try:candidates.add(Path(winreg.QueryValueEx(key,'Installdir')[0])/'3dsmax.exe')
+                            except OSError:pass
+            except OSError:pass
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,r'SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\3dsmax.exe') as key:
+                candidates.add(Path(winreg.QueryValueEx(key,'')[0]))
+        except OSError:pass
+    base=Path(os.environ.get('ProgramFiles','C:/Program Files'))/'Autodesk'
+    if base.is_dir():candidates.update(base.glob('3ds Max */3dsmax.exe'))
+    return sorted((p for p in candidates if p.is_file()),key=str,reverse=True)
+
+def launch_max(executable,bootstrap):
+    executable=Path(executable).resolve();bootstrap=Path(bootstrap).resolve()
+    if executable.name.lower()!='3dsmax.exe' or not executable.is_file():raise ValueError('请选择有效的 3dsmax.exe。')
+    if not bootstrap.is_file():raise ValueError('连接脚本缺失，请重新安装工具。')
+    return subprocess.Popen([str(executable),'-U','MAXScript',str(bootstrap)],cwd=str(executable.parent))
+
 
 def session_root():
     return Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'LXMaxAnimation' / 'sessions'

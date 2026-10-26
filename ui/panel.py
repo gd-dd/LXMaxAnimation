@@ -5,11 +5,12 @@ import time
 from PySide6.QtCore import Qt,QTimer,QThread,Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QLineEdit,QTreeWidget,QTreeWidgetItem,
-    QComboBox,QFileDialog,QSplitter,QHeaderView,QDialog,QDialogButtonBox,QFormLayout,QMessageBox,QInputDialog)
+    QComboBox,QFileDialog,QSplitter,QHeaderView,QDialog,QDialogButtonBox,QFormLayout,QMessageBox,QInputDialog,QToolButton,QMenu,QApplication)
 from .library import Library,KINDS,read_json,contained
 from . import integrations as host
 from .clip_editor import ClipEditor
 from .dialogs import CharacterDialog,CaptureDialog
+from .widgets import WheelRouter,AssetTree
 
 
 class Job(QThread):
@@ -23,36 +24,66 @@ class Job(QThread):
 class Panel(QWidget):
     def __init__(self,context,parent=None):
         super().__init__(parent);self.context=context;self.settings=context.load_settings()
-        self.library=None;self.active_character=None;self.active_session=None;self.pending=None
+        self.library=None;self.active_character=None;self.active_session=None;self.pending=None;self.launching=None
         self.jobs=[];self.closed=False;self.gallery=None;self.restoring=False
         self.setObjectName('LXAnimation')
-        self.setStyleSheet('QWidget#LXAnimation {background:#f7f9f3;color:#293b2b;} QGroupBox {border:1px solid #dbe5d1;border-radius:8px;margin-top:14px;padding-top:12px;} QGroupBox::title {subcontrol-origin:margin;left:10px;} QPushButton {padding:8px 12px;border:1px solid #c7d7b4;border-radius:6px;background:#edf3e5;color:#35512b;} QPushButton:hover {background:#dcebc9;} QLineEdit,QComboBox,QDoubleSpinBox,QPlainTextEdit {background:white;border:1px solid #d6dfcf;border-radius:5px;padding:6px;} QTreeWidget {background:white;border:1px solid #dbe5d1;border-radius:7px;} QTreeWidget::item {padding:7px;}')
+        self.setStyleSheet("""
+            QWidget#LXAnimation {background:#f5f7f2;color:#2c382c;}
+            QWidget#ClipWorkspace {background:#ffffff;border-radius:9px;}
+            QWidget#ClipWorkspace[empty="true"] {background:#e8ece6;}
+            QWidget:disabled {color:#9aa297;}
+            QLineEdit,QComboBox,QDoubleSpinBox,QSpinBox,QPlainTextEdit {background:#fff;border:1px solid #d6dfcf;border-radius:5px;padding:5px;}
+            QLineEdit:disabled,QComboBox:disabled,QDoubleSpinBox:disabled,QSpinBox:disabled,QPlainTextEdit:disabled {background:#edf0ea;color:#a0a69b;}
+            QPushButton,QToolButton {padding:7px 10px;border:1px solid #ccd9bf;border-radius:6px;background:#edf3e5;color:#35512b;}
+            QPushButton:hover,QToolButton:hover {background:#dcebc9;border-color:#a7bd8f;}
+            QPushButton:disabled,QToolButton:disabled {background:#e8ece4;color:#a4ad9d;border-color:#dce1d8;}
+            QTreeWidget {background:#fff;alternate-background-color:#f5f8f1;border:1px solid #d7e0d0;border-radius:7px;}
+            QTreeWidget::item {padding:6px;}
+            QTreeWidget::item:selected {background:#dcecc9;color:#243e1c;}
+            QTreeWidget:disabled {background:#edf0ea;color:#9aa297;}
+            QHeaderView::section {background:#edf2e7;border:0;border-bottom:1px solid #d6e0cc;padding:7px;color:#516346;}
+            QTabWidget::pane {border:1px solid #dce4d4;border-radius:5px;background:#fff;}
+            QTabBar::tab {padding:8px 13px;background:#edf2e8;color:#617154;border:0;}
+            QTabBar::tab:selected {background:#fff;color:#385623;border-bottom:3px solid #92b85b;}
+            QSplitter::handle:horizontal {background:#bbcba9;border-radius:3px;margin:8px 1px;}
+            QSplitter::handle:horizontal:hover {background:#88a862;}
+            QScrollArea {border:0;background:transparent;}
+            QScrollBar:vertical {width:10px;background:#f0f3eb;}
+            QScrollBar::handle:vertical {background:#b5c5a5;border-radius:4px;min-height:24px;}
+        """)
         outer=QVBoxLayout(self);outer.setContentsMargins(14,10,14,10)
         row=QHBoxLayout();self.avatar=QLabel();self.avatar.setFixedSize(58,58);row.addWidget(self.avatar)
         title=QVBoxLayout();self.character_title=QLabel('选择一个角色');self.character_title.setStyleSheet('font-size:22px;font-weight:650');title.addWidget(self.character_title)
         title.addWidget(QLabel('角色 · 动画 · Pose · Clip'));row.addLayout(title,1)
         row.addWidget(self.button('角色库',self.open_gallery));row.addWidget(self.button('资产库 / 同步',self.library_settings));outer.addLayout(row)
         row=QHBoxLayout();self.connection=QLabel('尚未连接 Max');self.connection.setWordWrap(True);row.addWidget(self.connection,1)
-        row.addWidget(self.button('连接 Max',self.connect_max));row.addWidget(self.button('断开',self.disconnect));row.addWidget(self.button('连接脚本',self.connection_help));outer.addLayout(row)
-        split=QSplitter();outer.addWidget(split,1)
+        row.addWidget(self.button('启动并连接 Max',self.start_max))
+        more=QToolButton();more.setText('连接 ▾');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
+        for title,fn in [('连接已打开的 Max',self.connect_max),('断开连接',self.disconnect),('选择 Max 程序',self.choose_max_program),('手动连接脚本',self.connection_help)]:menu.addAction(title,lambda fn=fn:self.guard(fn))
+        more.setMenu(menu);row.addWidget(more);outer.addLayout(row)
+        split=QSplitter();split.setHandleWidth(8);outer.addWidget(split,1)
         left=QWidget();leftbox=QVBoxLayout(left);leftbox.setContentsMargins(0,8,8,0)
         row=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText('搜索动画 / Pose / 备注');self.search.textChanged.connect(lambda:self.guard(self.refresh_assets))
         self.kind=QComboBox();self.kind.addItem('全部','');[self.kind.addItem(v,k) for k,v in KINDS.items()];self.kind.currentIndexChanged.connect(lambda:self.guard(self.refresh_assets))
         row.addWidget(self.search,1);row.addWidget(self.kind);leftbox.addLayout(row)
-        self.assets=QTreeWidget();self.assets.setHeaderLabels(['名称','类型','版本','备注']);self.assets.setRootIsDecorated(False);self.assets.setSortingEnabled(True);self.assets.sortItems(0,Qt.SortOrder.AscendingOrder)
+        self.assets=AssetTree();self.assets.setAlternatingRowColors(True);self.assets.setHeaderLabels(['名称','类型','版本','备注']);self.assets.setRootIsDecorated(False);self.assets.setSortingEnabled(True);self.assets.sortItems(0,Qt.SortOrder.AscendingOrder)
         self.assets.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch);self.assets.header().setSectionResizeMode(3,QHeaderView.ResizeMode.Stretch)
         self.assets.setColumnWidth(1,95);self.assets.setColumnWidth(2,65)
         self.assets.currentItemChanged.connect(self.asset_changed);self.assets.itemDoubleClicked.connect(lambda *_:self.guard(lambda:self.send_to_max(self.selected_asset())))
+        self.assets.itemChanged.connect(self.asset_metadata_changed)
         leftbox.addWidget(self.assets,1)
-        row=QHBoxLayout();row.addWidget(self.button('从 Max 导入动画',lambda:self.capture('animation')));row.addWidget(self.button('保存单帧 Pose',lambda:self.capture('pose')));leftbox.addLayout(row)
-        row=QHBoxLayout();self.save_button=self.button('从 Max 保存所选资产',self.overwrite);row.addWidget(self.save_button);row.addWidget(self.button('修改名称 / 备注',self.edit_metadata));row.addWidget(self.button('刷新',self.refresh_assets));leftbox.addLayout(row)
-        hint=QLabel('双击动画替换 Max 当前场景；双击 Pose 应用到当前帧并打键。\nMax 保存不写回库，只有明确导入 / 覆盖才更新库。');hint.setWordWrap(True);leftbox.addWidget(hint)
+        row=QHBoxLayout();create=QToolButton();create.setText('＋ 从 Max 导入');create.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(create)
+        menu.addAction('动画',lambda:self.guard(lambda:self.capture('animation')));menu.addAction('单帧 Pose',lambda:self.guard(lambda:self.capture('pose')));menu.addSeparator();menu.addAction('刷新列表',lambda:self.guard(self.refresh_assets));create.setMenu(menu);row.addWidget(create)
+        self.selection_label=QLabel('未选择资产');row.addWidget(self.selection_label,1)
+        self.save_button=self.button('从 Max 保存',self.overwrite);self.save_button.setEnabled(False);row.addWidget(self.save_button);leftbox.addLayout(row)
+        hint=QLabel('双击加载到 Max · 选中后再单击名称 / 备注编辑\n仅“从 Max 保存”写回库；不自动备份当前场景。');hint.setWordWrap(True);leftbox.addWidget(hint)
         split.addWidget(left)
         right=QWidget();rightbox=QVBoxLayout(right);rightbox.setContentsMargins(8,8,0,0)
         self.editor=ClipEditor();self.editor.message.connect(self.set_status);rightbox.addWidget(self.editor,1)
         footer=QHBoxLayout();footer.addWidget(QLabel('Unity 导出与后处理接口：后续接入'),1);button=QPushButton('导出到 Unity · 暂未接入');button.setEnabled(False);footer.addWidget(button);rightbox.addLayout(footer)
         split.addWidget(right);split.setSizes([490,560]);split.setChildrenCollapsible(False)
         self.status=QLabel('先连接 Max，再从角色库导入 T-pose。');self.status.setWordWrap(True);self.status.setTextFormat(Qt.TextFormat.PlainText);self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse);outer.addWidget(self.status)
+        self.wheel_router=WheelRouter(self,self.editor.current_scroll)
         path=self.settings.get('library') or str(context.data_root/'library')
         self.guard(lambda:self.load_library(path))
         self.active_session=self.settings.get('session')
@@ -65,7 +96,7 @@ class Panel(QWidget):
         except Exception as exc:self.set_status('操作失败：'+str(exc))
     def set_status(self,text):
         if not self.closed:self.status.setText(str(text))
-    def busy(self):return self.pending is not None or any(j.isRunning() for j in self.jobs)
+    def busy(self):return self.pending is not None or self.launching is not None or any(j.isRunning() for j in self.jobs)
     def idle(self):
         if self.busy():raise ValueError('当前任务尚未完成，请等待。')
     def persist(self):
@@ -134,20 +165,22 @@ class Panel(QWidget):
             if self.kind.currentData() and asset['kind']!=self.kind.currentData():continue
             if self.search.text().casefold() not in (asset['name']+' '+asset.get('notes','')).casefold():continue
             item=QTreeWidgetItem([asset['name'],KINDS[asset['kind']],f"v{asset['_displayVersion']:03d}",asset.get('notes','')]);item.setToolTip(2,asset['revision']);item.setData(0,Qt.ItemDataRole.UserRole,asset)
+            item.setFlags(item.flags()|Qt.ItemFlag.ItemIsEditable)
             self.assets.addTopLevelItem(item)
             if asset['id']==select_id:chosen=item
         self.assets.setSortingEnabled(True)
         if chosen:self.assets.setCurrentItem(chosen)
         self.restoring=False
         asset=chosen.data(0,Qt.ItemDataRole.UserRole) if chosen else None
-        self.editor.set_asset(self.library,asset)
+        self.editor.set_asset(self.library,asset);self.update_selection_controls(asset)
         if errors:self.set_status('索引异常：'+'; '.join(errors))
     def asset_changed(self,item,old):
         if self.restoring:return
         try:self.editor.flush()
         except Exception as exc:
             self.set_status(str(exc));self.restoring=True;self.assets.setCurrentItem(old);self.restoring=False;return
-        self.guard(lambda:self.editor.set_asset(self.library,item.data(0,Qt.ItemDataRole.UserRole) if item else None))
+        asset=item.data(0,Qt.ItemDataRole.UserRole) if item else None
+        self.guard(lambda:self.editor.set_asset(self.library,asset));self.update_selection_controls(asset)
     def connect_max(self):
         self.idle();available=host.sessions()
         if not available:self.connection_help();return
@@ -191,14 +224,50 @@ class Panel(QWidget):
             self.pending={'result':str(result),'time':time.time(),'type':'import','session':session['directory']}
             self.set_status('正在替换 Max 当前场景…' if asset['kind']=='animation' else '正在向 Max 应用资产…')
         self.run_job(lambda:library.verify(asset),'正在校验库文件…',ready)
-    def edit_metadata(self):
-        self.idle();asset=self.selected_asset();dialog=QDialog(self);dialog.setWindowTitle('修改资产信息');form=QFormLayout(dialog)
-        name=QLineEdit(asset['name']);notes=QLineEdit(asset.get('notes',''));form.addRow('名称',name);form.addRow('备注',notes)
-        buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel);buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);form.addRow(buttons)
-        if dialog.exec():
+    def update_selection_controls(self,asset):
+        self.save_button.setEnabled(asset is not None)
+        self.selection_label.setText(asset['name'] if asset else '未选择资产')
+        self.selection_label.setToolTip(asset['name'] if asset else '')
+
+    def asset_metadata_changed(self,item,column):
+        if self.restoring or column not in (0,3):return
+        asset=item.data(0,Qt.ItemDataRole.UserRole)
+        if not asset:return
+        try:
+            self.idle();self.editor.flush()
             from .library import safe_name,write_json
+            key='name' if column==0 else 'notes';value=safe_name(item.text(column)) if column==0 else item.text(column)
             path=contained(self.library.root,Path(asset['_directory']).relative_to(self.library.root))/'asset.json'
-            data=read_json(path);data.update(name=safe_name(name.text()),notes=notes.text());write_json(path,data);self.refresh_assets()
+            data=read_json(path);data[key]=value;write_json(path,data)
+            asset[key]=value;self.restoring=True;item.setData(0,Qt.ItemDataRole.UserRole,asset);self.restoring=False
+            self.update_selection_controls(asset)
+            if self.editor.asset and self.editor.asset['id']==asset['id']:
+                self.editor.asset[key]=value;self.editor.title.setText(asset['name']+' · Clip 拆分')
+            self.set_status('资产信息已保存。')
+        except Exception as exc:
+            self.restoring=True;item.setText(column,asset['name' if column==0 else 'notes']);self.restoring=False
+            self.set_status('修改未保存：'+str(exc))
+
+    def choose_max_program(self):
+        path,_=QFileDialog.getOpenFileName(self,'选择 3ds Max 程序',self.settings.get('maxExecutable',''),'3ds Max (3dsmax.exe)')
+        if path:self.settings['maxExecutable']=path;self.persist()
+        return path
+
+    def start_max(self):
+        self.idle();path=self.settings.get('maxExecutable')
+        if not path or not Path(path).is_file():
+            found=host.max_installations()
+            if len(found)==1:path=str(found[0])
+            elif found:
+                path,ok=QInputDialog.getItem(self,'启动 Max','选择版本',[str(p) for p in found],0,False)
+                if not ok:return
+            else:path=self.choose_max_program()
+        if not path:return
+        process=host.launch_max(path,self.context.resource('max/bootstrap.ms'))
+        self.settings['maxExecutable']=str(path);self.active_session=None
+        self.launching={'process':process,'pid':process.pid,'time':time.time()};self.persist()
+        self.set_status('正在启动 Max，连接脚本就绪后自动绑定该窗口…')
+
     def library_settings(self):
         self.idle();self.editor.flush();dialog=QDialog(self);dialog.setWindowTitle('资产库与同步');dialog.resize(650,200);form=QFormLayout(dialog)
         row=QHBoxLayout();path=QLineEdit(str(self.library.root) if self.library else '');row.addWidget(path,1)
@@ -219,10 +288,17 @@ class Panel(QWidget):
         form.addRow(row);dialog.exec()
     def poll(self):
         if self.closed:return
-        matches=[s for s in host.sessions() if s['directory']==self.active_session]
+        available=host.sessions()
+        if self.launching:
+            started=next((s for s in available if s['pid']==self.launching['pid'] and s.get('protocol',1)>=2),None)
+            if started:
+                self.active_session=started['directory'];self.launching=None;self.persist();self.set_status('Max 已启动并连接。')
+            elif self.launching['process'].poll() is not None or time.time()-self.launching['time']>240:
+                self.launching=None;self.set_status('Max 未返回连接，请检查启动界面，再从“连接”菜单选择窗口。')
+        matches=[s for s in available if s['directory']==self.active_session]
         if matches:
             session=matches[0];self.connection.setText(f"● Max · PID {session['pid']} · {Path(session.get('scene') or '未命名场景').name}  |  {session.get('start','?')} — {session.get('end','?')} 帧 · {session.get('fps','?')} FPS · 当前 {session.get('frame','?')}")
-        else:self.connection.setText('○ Max 未连接' if not self.active_session else '○ Max 连接已断开；不会自动切换到其他窗口')
+        else:self.connection.setText('◌ 正在启动 Max…' if self.launching else ('○ Max 未连接' if not self.active_session else '○ Max 连接已断开'))
         pending=self.pending
         if not pending:return
         path=Path(pending['result'])
@@ -253,8 +329,8 @@ class Panel(QWidget):
         except Exception:
             if self.editor.data:
                 from .library import write_json
-                write_json(self.context.data_root/'clip-recovery.json',{'assetId':self.editor.asset['id'],'lastValid':self.editor.data,'name':self.editor.name.text(),'firstFrame':self.editor.first.value(),'lastFrame':self.editor.last.value(),'extraText':self.editor.extra.toPlainText()})
-        self.closed=True;self.timer.stop()
+                write_json(self.context.data_root/'clip-recovery.json',{'assetId':self.editor.asset['id'],'lastValid':self.editor.data,'extraText':self.editor.extra.toPlainText()})
+        self.closed=True;self.timer.stop();self.wheel_router.stop()
         if self.gallery:self.gallery.close()
         for job in self.jobs:
             if job.isRunning():job.setParent(None);_finishing.append(job);job.finished.connect(lambda j=job:_release(j))

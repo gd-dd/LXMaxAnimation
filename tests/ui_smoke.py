@@ -4,7 +4,10 @@ import sys,tempfile
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from PySide6.QtWidgets import QApplication,QWidget,QVBoxLayout
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt,QPoint,QPointF
+from PySide6.QtGui import QWheelEvent
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QLineEdit,QScrollArea
 from ui.panel import create_panel
 from ui.library import Library,write_json
 from ui import clips
@@ -32,15 +35,35 @@ with tempfile.TemporaryDirectory() as temp:
     panel.assets.sortItems(0,Qt.SortOrder.DescendingOrder)
     assert panel.assets.topLevelItem(0).text(0)=='Walk'
     panel.assets.setCurrentItem(panel.assets.topLevelItem(0));app.processEvents()
-    panel.editor.add_clip();panel.editor.name.setText('Walk_Loop');panel.editor.first.setValue(20);panel.editor.last.setValue(80);panel.editor.loop.setChecked(True);panel.editor.flush()
+    panel.editor.add_clip();app.processEvents();row=panel.editor.table.currentItem()
+    clip_rect=panel.editor.table.visualItemRect(row)
+    QTest.mouseClick(panel.editor.table.viewport(),Qt.MouseButton.LeftButton,pos=QPoint(clip_rect.left()+20,clip_rect.center().y()))
+    QTest.mouseDClick(panel.editor.table.viewport(),Qt.MouseButton.LeftButton,pos=QPoint(clip_rect.left()+20,clip_rect.center().y()))
+    app.processEvents();assert panel.editor.table.findChild(QLineEdit) is not None
+    QTest.keyClick(panel.editor.table.findChild(QLineEdit),Qt.Key.Key_Escape)
+    row.setText(0,'Walk_Loop');row.setText(1,'20');row.setText(2,'80');row.setCheckState(3,Qt.CheckState.Checked)
     data=clips.load(library,animation);assert len(data['clips'])==2
     assert data['clips'][1]['settings']['loopTime'] and not data['clips'][0]['settings']['loopTime']
-    panel.editor.last.setValue(999)
-    try:panel.editor.flush()
-    except ValueError:pass
-    else:raise AssertionError('Invalid clip range accepted')
+    assert panel.editor.loop.isChecked()
+    panel.editor.loop.setChecked(False);assert row.checkState(3)==Qt.CheckState.Unchecked
+    panel.editor.loop.setChecked(True);assert row.checkState(3)==Qt.CheckState.Checked
+    row.setText(2,'999');app.processEvents()
     assert clips.load(library,animation)==data
-    panel.editor.last.setValue(80)
+    assert panel.editor.table.currentItem().text(2)=='80'
+    # Wheel over a focused value must scroll the active page, never alter the value.
+    panel.editor.tabs.setCurrentIndex(1);app.processEvents()
+    spin=panel.editor.importer.controls['globalScale'];spin.setFocus();value=spin.value()
+    scroll=panel.editor.importer.currentWidget();scroll.verticalScrollBar().setValue(0)
+    wheel=QWheelEvent(QPointF(spin.rect().center()),QPointF(spin.mapToGlobal(spin.rect().center())),QPoint(),QPoint(0,-120),Qt.MouseButton.NoButton,Qt.KeyboardModifier.NoModifier,Qt.ScrollPhase.NoScrollPhase,False)
+    app.sendEvent(spin,wheel);app.processEvents()
+    assert spin.value()==value and scroll.verticalScrollBar().value()>0
+    combo=panel.editor.target;index=combo.currentIndex();combo.setFocus();app.sendEvent(combo,wheel);assert combo.currentIndex()==index
+    # No page scrollbar is nested inside another page scrollbar.
+    for area in panel.editor.findChildren(QScrollArea):
+        parent=area.parentWidget()
+        while parent:
+            assert not isinstance(parent,QScrollArea)
+            parent=parent.parentWidget()
     before=[(c['id'],c['name'],c['firstFrame'],c['lastFrame']) for c in data['clips']]
     panel.editor.preset.setCurrentText('根运动行走 / 跑步');panel.editor.apply_selected_preset()
     after=clips.load(library,animation)
@@ -48,6 +71,24 @@ with tempfile.TemporaryDirectory() as temp:
     assert not after['clips'][1]['settings']['lockRootPositionXZ']
     panel.editor.importer.controls['globalScale'].setValue(0.01);panel.editor.flush()
     assert clips.load(library,animation)['fbxSettings']['globalScale']==0.01
+    # Inline metadata editing persists; double-click cancels delayed editing and only loads.
+    asset_item=panel.assets.currentItem();asset_item.setText(3,'新的备注')
+    assert library.list_assets('测试角色','新的备注')[0][0]['id']==animation['id']
+    loaded=[];panel.send_to_max=lambda asset:loaded.append(asset['id'])
+    rect=panel.assets.visualItemRect(asset_item);point=QPoint(rect.left()+20,rect.center().y())
+    QTest.mouseClick(panel.assets.viewport(),Qt.MouseButton.LeftButton,pos=point)
+    QTest.qWait(QApplication.doubleClickInterval()+150)
+    assert panel.assets.findChild(QLineEdit) is not None
+    rename=panel.assets.findChild(QLineEdit)
+    QTest.keyClick(rename,Qt.Key.Key_A,Qt.KeyboardModifier.ControlModifier);QTest.keyClicks(rename,'Walk_Run');QTest.keyClick(rename,Qt.Key.Key_Return);app.processEvents()
+    assert library.list_assets('测试角色','Walk_Run')[0][0]['id']==animation['id']
+    QTest.mouseDClick(panel.assets.viewport(),Qt.MouseButton.LeftButton,pos=point)
+    QTest.qWait(QApplication.doubleClickInterval()+150)
+    assert loaded==[animation['id']]
+    panel.assets.clearSelection();panel.assets.setCurrentItem(None);app.processEvents();assert not panel.editor.isEnabled()
+    panel.grab().save(str(root/'local-data/panel-empty.png'))
+    panel.assets.setCurrentItem(asset_item);app.processEvents();assert panel.editor.isEnabled()
+    panel.editor.tabs.setCurrentIndex(0)
     panel.open_gallery();app.processEvents();assert panel.gallery.cards.count()==2
     panel.gallery.category.setCurrentIndex(panel.gallery.category.findData('主角'));assert panel.gallery.cards.count()==1
     panel.gallery.grab().save(str(root/'local-data/characters.png'));panel.gallery.hide()
