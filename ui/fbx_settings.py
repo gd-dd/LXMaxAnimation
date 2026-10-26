@@ -74,6 +74,14 @@ LABELS.update({'wrapMode':'播放边界模式','loop':'旧版循环标记','rota
 TUANJIE={'aCLCompressionLevel','aCLCurvePrecision','isVirtualGeometry','additiveType','basePoseType',
          'additiveSelectedAnimation','additiveSelectedAnimationFrameIndex','intervals','lockToRoot'}
 
+LABELS.update(dict(zip(
+    'importVisibility importBlendShapeDeformPercent addCollider normalSmoothingAngle swapUVChannels weldVertices bakeAxisConversion optimizeBones keepQuads indexFormat preserveHierarchy generateSecondaryUV secondaryUVAngleDistortion secondaryUVAreaDistortion secondaryUVHardAngle secondaryUVMarginMethod secondaryUVPackMargin secondaryUVMinLightmapResolution secondaryUVMinObjectScale generateAnimations meshOptimizationFlags optimizeMeshPolygons optimizeMeshVertices skinWeights maxBonesPerVertex minBoneWeight importNormals normalSmoothingSource importBlendShapeNormals normalCalculationMode importTangents bakeIK removeConstantScaleCurves strictVertexDataChecks optimizeGameObjects extraExposedTransformPaths extraUserProperties aCLCompressionLevel aCLCurvePrecision animationWrapMode humanoidOversampling motionNodeName useSRGBMaterialColor sortHierarchyByName autoGenerateAvatarMappingIfUnspecified isVirtualGeometry'.split(),
+    '导入可见性|导入形态键变形百分比|添加碰撞体|法线平滑角度|交换 UV 通道|焊接顶点|烘焙坐标轴转换|优化骨骼|保留四边形|索引格式|保留层级|生成光照贴图 UV|UV 角度畸变|UV 面积畸变|UV 硬边角度|UV 边距方式|UV 打包边距|最小光照贴图分辨率|最小物体缩放|动画生成方式|网格优化选项|优化多边形|优化顶点|蒙皮权重模式|每顶点最大骨骼数|最小骨骼权重|导入法线|法线平滑来源|形态键法线|法线计算方式|导入切线|烘焙 IK|移除恒定缩放曲线|严格顶点数据检查|优化游戏对象|额外暴露的节点路径|额外用户属性|ACL 压缩级别|ACL 曲线精度|动画播放边界模式|人形动画过采样|根运动节点名称|材质颜色使用 sRGB|按名称排序层级|缺省时自动生成 Avatar 映射|虚拟几何体'.split('|'))))
+
+OPTION_LABELS=dict(zip(
+    'ACL AngleWeighted AreaAndAngleWeighted AreaWeighted Auto Automatic BasedOnMaterialName BasedOnModelNameAndMaterialName BasedOnTextureName BasedOnTextureName_Or_ModelNameAndMaterialName Calculate CalculateLegacy CalculateLegacyWithSplitTangents CalculateMikk Clamp ClampForever CopyFromOther CreateFromThisModel Custom Default Everything Everywhere External Extreme8Bit FromAngle FromSmoothingGroups GenerateAnimations Generic High Highest Human Import ImportStandard ImportViaMaterialDescription InNodes InOriginalRoots InPrefab InRoot KeyframeReduction KeyframeReductionAndCompression Legacy LegacyImport Local Loop Low Manual Medium NoAvatar None Off Once Optimal PingPong PolygonOrder PreferSmoothingGroups RecursiveUp Standard UInt16 UInt32 Unweighted Unweighted_Legacy VertexOrder X1 X2 X4 X8'.split(),
+    'ACL 压缩|角度加权|面积和角度加权|面积加权|自动|自动|按材质名|按模型名和材质名|按贴图名|按贴图名或模型名与材质名|计算|传统计算|传统计算并拆分切线|MikkTSpace 计算|钳制|持续钳制|从其他模型复制|从本模型创建|自定义|默认|全部|所有位置|外部|极限 8 位|按角度|按平滑组|生成动画|通用|高|最高|人形|导入|标准导入|通过材质描述导入|在节点中|在原始根节点中|在预制体中|在根节点中|减少关键帧|减少关键帧并压缩|传统|传统导入|本地|循环|低|手动|中|不使用 Avatar|无|关闭|单次|最优|往返|多边形顺序|优先平滑组|向上递归|标准|16 位无符号|32 位无符号|不加权|传统不加权|顶点顺序|1 倍|2 倍|4 倍|8 倍'.split('|')))
+
 class SettingsForm(QTabWidget):
     def __init__(self,scope,parent=None):
         super().__init__(parent);self.scope=scope;self.controls={};self.original={};self.forms={}
@@ -84,13 +92,15 @@ class SettingsForm(QTabWidget):
             scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(body);self.addTab(scroll,title);self.forms[title]=form
         for field in fields(scope):
             key=field['name'];kind=field['type'];options=field['options']
-            if options:control=QComboBox();control.addItems(options)
+            if options:
+                control=QComboBox()
+                for option in options:control.addItem(OPTION_LABELS.get(option,option)+' · '+option,option)
             elif kind=='System.Boolean':control=QCheckBox()
             elif kind=='System.Int32':control=QSpinBox();control.setRange(-1000000000,1000000000)
             elif kind=='System.Single':control=QDoubleSpinBox();control.setRange(-1e9,1e9);control.setDecimals(6)
             elif kind=='System.String' or kind in ('UnityEngine.Avatar','UnityEngine.AvatarMask','UnityEngine.AnimationClip'):control=QLineEdit()
             else:control=ExpandingJson()
-            label=QLabel(LABELS.get(key,re.sub(r'(?=[A-Z])','\u200b',key)));label.setWordWrap(True)
+            label=QLabel(LABELS.get(key,key)+'\n'+re.sub(r'(?=[A-Z])','\u200b',key));label.setWordWrap(True)
             label.setFixedWidth(155);label.setToolTip(key)
             if not isinstance(control,QCheckBox):control.setMinimumWidth(260);control.setMinimumHeight(34)
             if key in TUANJIE:label.setText(label.text()+'（团结扩展）')
@@ -104,8 +114,8 @@ class SettingsForm(QTabWidget):
             value=values.get(key,defaults(self.scope)[key])
             if isinstance(control,QCheckBox):control.setChecked(bool(value))
             elif isinstance(control,QComboBox):
-                if control.findText(str(value))<0:control.addItem(str(value))
-                control.setCurrentText(str(value))
+                if control.findData(str(value))<0:control.addItem(str(value),str(value))
+                control.setCurrentIndex(control.findData(str(value)))
             elif isinstance(control,(QSpinBox,QDoubleSpinBox)):control.setValue(value)
             elif isinstance(control,QPlainTextEdit):control.setPlainText(json.dumps(value,ensure_ascii=False,indent=2))
             else:control.setText(value or '')
@@ -114,7 +124,7 @@ class SettingsForm(QTabWidget):
         values=copy.deepcopy(self.original)
         for key,control in self.controls.items():
             if isinstance(control,QCheckBox):value=control.isChecked()
-            elif isinstance(control,QComboBox):value=control.currentText()
+            elif isinstance(control,QComboBox):value=control.currentData()
             elif isinstance(control,(QSpinBox,QDoubleSpinBox)):value=control.value()
             elif isinstance(control,QPlainTextEdit):
                 try:value=json.loads(control.toPlainText())
