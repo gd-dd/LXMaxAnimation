@@ -2,7 +2,6 @@
 import copy
 import json
 import math
-import re
 from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QWidget,QFormLayout,QCheckBox,QComboBox,QDoubleSpinBox,QSpinBox,
@@ -94,13 +93,13 @@ class SettingsForm(QTabWidget):
             key=field['name'];kind=field['type'];options=field['options']
             if options:
                 control=QComboBox()
-                for option in options:control.addItem(OPTION_LABELS.get(option,option)+' · '+option,option)
+                for option in options:control.addItem(OPTION_LABELS.get(option,option)+'/'+option,option)
             elif kind=='System.Boolean':control=QCheckBox()
             elif kind=='System.Int32':control=QSpinBox();control.setRange(-1000000000,1000000000)
             elif kind=='System.Single':control=QDoubleSpinBox();control.setRange(-1e9,1e9);control.setDecimals(6)
             elif kind=='System.String' or kind in ('UnityEngine.Avatar','UnityEngine.AvatarMask','UnityEngine.AnimationClip'):control=QLineEdit()
             else:control=ExpandingJson()
-            label=QLabel(LABELS.get(key,key)+'\n'+re.sub(r'(?=[A-Z])','\u200b',key));label.setWordWrap(True)
+            label=QLabel(LABELS.get(key,key)+'/'+key);label.setWordWrap(True)
             label.setFixedWidth(155);label.setToolTip(key)
             if not isinstance(control,QCheckBox):control.setMinimumWidth(260);control.setMinimumHeight(34)
             if key in TUANJIE:label.setText(label.text()+'（团结扩展）')
