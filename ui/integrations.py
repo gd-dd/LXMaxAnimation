@@ -34,7 +34,27 @@ def launch_max(executable,bootstrap):
     executable=Path(executable).resolve();bootstrap=Path(bootstrap).resolve()
     if executable.name.lower()!='3dsmax.exe' or not executable.is_file():raise ValueError('请选择有效的 3dsmax.exe。')
     if not bootstrap.is_file():raise ValueError('连接脚本缺失，请重新安装工具。')
-    return subprocess.Popen([str(executable),'-U','MAXScript',str(bootstrap)],cwd=str(executable.parent))
+    env=dict(os.environ)
+    # Same host isolation as Max Tools: LXTool's Qt/Python runtime must not leak into Max.
+    for key in ('QT_QPA_PLATFORM','QT_PLUGIN_PATH','QT_QPA_PLATFORM_PLUGIN_PATH','PYTHONHOME','PYTHONPATH'):
+        env.pop(key,None)
+    return subprocess.Popen([str(executable),'-U','MAXScript',str(bootstrap)],cwd=str(executable.parent),env=env)
+
+def preferred_max(saved=''):
+    candidates=[saved]
+    shared=Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'LXMaxTools/max-path.txt'
+    try:candidates.append(shared.read_text('utf-8-sig').strip())
+    except OSError:pass
+    for value in candidates:
+        path=Path(value) if value else None
+        if path and path.name.lower()=='3dsmax.exe' and path.is_file():return path
+    found=max_installations()
+    return found[0] if found else None
+
+def preferred_session(available,saved=None):
+    ready=[s for s in available if s.get('protocol',1)>=2]
+    remembered=next((s for s in ready if s['directory']==saved),None)
+    return remembered or (ready[0] if len(ready)==1 else None)
 
 
 def session_root():

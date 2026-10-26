@@ -24,7 +24,7 @@ class Job(QThread):
 class Panel(QWidget):
     def __init__(self,context,parent=None):
         super().__init__(parent);self.context=context;self.settings=context.load_settings()
-        self.library=None;self.active_character=None;self.active_session=None;self.pending=None;self.launching=None
+        self.library=None;self.active_character=None;self.active_session=self.settings.get('session');self.pending=None;self.launching=None
         self.jobs=[];self.closed=False;self.gallery=None;self.restoring=False
         self.setObjectName('LXAnimation')
         self.setStyleSheet("""
@@ -57,9 +57,9 @@ class Panel(QWidget):
         title.addWidget(QLabel('角色 · 动画 · Pose · Clip'));row.addLayout(title,1)
         row.addWidget(self.button('角色库',self.open_gallery));row.addWidget(self.button('资产库 / 同步',self.library_settings));outer.addLayout(row)
         row=QHBoxLayout();self.connection=QLabel('尚未连接 Max');self.connection.setWordWrap(True);row.addWidget(self.connection,1)
-        row.addWidget(self.button('启动并连接 Max',self.start_max))
+        self.connect_button=self.button('一键连接 Max',self.start_max);row.addWidget(self.connect_button)
         more=QToolButton();more.setText('连接 ▾');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
-        for title,fn in [('连接已打开的 Max',self.connect_max),('断开连接',self.disconnect),('选择 Max 程序',self.choose_max_program),('手动连接脚本',self.connection_help)]:menu.addAction(title,lambda fn=fn:self.guard(fn))
+        for title,fn in [('切换 Max 窗口',self.connect_max),('断开连接',self.disconnect),('更换 Max 程序',self.choose_max_program)]:menu.addAction(title,lambda fn=fn:self.guard(fn))
         more.setMenu(menu);row.addWidget(more);outer.addLayout(row)
         split=QSplitter();split.setHandleWidth(8);outer.addWidget(split,1)
         left=QWidget();leftbox=QVBoxLayout(left);leftbox.setContentsMargins(0,8,8,0)
@@ -87,6 +87,7 @@ class Panel(QWidget):
         path=self.settings.get('library') or str(context.data_root/'library')
         self.guard(lambda:self.load_library(path))
         self.active_session=self.settings.get('session')
+        self.auto_reconnect=True
         self.timer=QTimer(self);self.timer.setInterval(750);self.timer.timeout.connect(self.poll);self.timer.start();self.poll()
 
     def button(self,title,fn):
@@ -183,12 +184,15 @@ class Panel(QWidget):
         self.guard(lambda:self.editor.set_asset(self.library,asset));self.update_selection_controls(asset)
     def connect_max(self):
         self.idle();available=host.sessions()
-        if not available:self.connection_help();return
+        available=[s for s in available if s.get('protocol',1)>=2]
+        if not available:self.start_max();return
+        if len(available)==1:
+            self.active_session=available[0]['directory'];self.auto_reconnect=False;self.persist();self.poll();return
         dialog=QDialog(self);dialog.setWindowTitle('选择唯一连接的 Max 窗口');layout=QVBoxLayout(dialog);combo=QComboBox()
         for session in available:combo.addItem(f"PID {session['pid']} · {session.get('scene') or '未命名场景'}",session['directory'])
         layout.addWidget(combo);buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel);buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);layout.addWidget(buttons)
-        if dialog.exec():self.active_session=combo.currentData();self.persist();self.poll()
-    def disconnect(self):self.idle();self.active_session=None;self.persist();self.poll()
+        if dialog.exec():self.active_session=combo.currentData();self.auto_reconnect=False;self.persist();self.poll()
+    def disconnect(self):self.idle();self.active_session=None;self.auto_reconnect=False;self.persist();self.poll()
     def connection_help(self):
         script=self.context.resource('max/bootstrap.ms')
         QMessageBox.information(self,'连接 Max',f'在需要连接的 Max 窗口中，通过 Scripting → Run Script 运行：\n\n{script}\n\n随后点击“连接 Max”选择该窗口。一次只绑定一个窗口。')
@@ -250,21 +254,26 @@ class Panel(QWidget):
 
     def choose_max_program(self):
         path,_=QFileDialog.getOpenFileName(self,'选择 3ds Max 程序',self.settings.get('maxExecutable',''),'3ds Max (3dsmax.exe)')
-        if path:self.settings['maxExecutable']=path;self.persist()
+        if path:
+            if Path(path).name.lower()!='3dsmax.exe':raise ValueError('请选择 3dsmax.exe。')
+            self.settings['maxExecutable']=path;self.persist()
         return path
 
     def start_max(self):
-        self.idle();path=self.settings.get('maxExecutable')
-        if not path or not Path(path).is_file():
-            found=host.max_installations()
-            if len(found)==1:path=str(found[0])
-            elif found:
-                path,ok=QInputDialog.getItem(self,'启动 Max','选择版本',[str(p) for p in found],0,False)
-                if not ok:return
-            else:path=self.choose_max_program()
+        if self.launching:
+            self.set_status('Max 正在启动，就绪后会自动连接，请稍候。');return
+        self.idle();available=host.sessions()
+        selected=host.preferred_session(available,self.active_session or self.settings.get('session'))
+        if selected:
+            self.active_session=selected['directory'];self.auto_reconnect=False;self.persist();self.poll()
+            self.set_status('已连接 Max，无需重复启动。');return
+        if any(s.get('protocol',1)>=2 for s in available):self.connect_max();return
+        path=host.preferred_max(self.settings.get('maxExecutable',''))
+        if not path:path=self.choose_max_program()
         if not path:return
         process=host.launch_max(path,self.context.resource('max/bootstrap.ms'))
         self.settings['maxExecutable']=str(path);self.active_session=None
+        self.auto_reconnect=False
         self.launching={'process':process,'pid':process.pid,'time':time.time()};self.persist()
         self.set_status('正在启动 Max，连接脚本就绪后自动绑定该窗口…')
 
@@ -289,6 +298,10 @@ class Panel(QWidget):
     def poll(self):
         if self.closed:return
         available=host.sessions()
+        if self.auto_reconnect and not self.launching:
+            selected=host.preferred_session(available,self.active_session)
+            if selected:
+                self.active_session=selected['directory'];self.auto_reconnect=False;self.persist()
         if self.launching:
             started=next((s for s in available if s['pid']==self.launching['pid'] and s.get('protocol',1)>=2),None)
             if started:

@@ -93,5 +93,19 @@ with tempfile.TemporaryDirectory() as temp:
     panel.gallery.category.setCurrentIndex(panel.gallery.category.findData('主角'));assert panel.gallery.cards.count()==1
     panel.gallery.grab().save(str(root/'local-data/characters.png'));panel.gallery.hide()
     panel.grab().save(str(root/'local-data/panel-workflow.png'))
+    from unittest.mock import patch,Mock
+    fake_exe=base/'3dsmax.exe';fake_exe.touch();process=Mock(pid=87654);process.poll.return_value=None
+    panel.disconnect()
+    with patch('ui.panel.host.sessions',return_value=[]),patch('ui.panel.host.preferred_max',return_value=None),patch('ui.panel.QFileDialog.getOpenFileName',return_value=(str(fake_exe),'')) as picker,patch('ui.panel.host.launch_max',return_value=process) as launch:
+        panel.start_max();panel.start_max()
+        assert picker.call_count==1 and launch.call_count==1
+        assert panel.settings['maxExecutable']==str(fake_exe)
+        ready={'protocol':2,'directory':'test-session','pid':87654}
+        with patch('ui.panel.host.sessions',return_value=[dict(ready,pid=12345)]):
+            panel.poll();assert panel.active_session is None
+        with patch('ui.panel.host.sessions',return_value=[ready]):
+            panel.poll();assert panel.active_session=='test-session'
+            panel.disconnect();panel.poll();assert panel.active_session is None
+            panel.start_max();assert panel.active_session=='test-session' and launch.call_count==1
     panel.shutdown();panel.shutdown();shell.close()
 print('UI passed: embedded widget, sorting/search, role category gallery, independent clip settings, validation and persistence')
