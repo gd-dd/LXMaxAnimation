@@ -2,7 +2,9 @@
 import copy
 import json
 import math
+import re
 from pathlib import Path
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QWidget,QFormLayout,QCheckBox,QComboBox,QDoubleSpinBox,QSpinBox,
     QLineEdit,QPlainTextEdit,QTabWidget,QScrollArea,QLabel)
 from .widgets import ExpandingJson
@@ -77,7 +79,8 @@ class SettingsForm(QTabWidget):
         super().__init__(parent);self.scope=scope;self.controls={};self.original={};self.forms={}
         if scope=='clip':self.tabBar().hide()
         for title in (['Model · 模型','Rig · 骨骼','Animation · 动画','Materials · 材质'] if scope=='importer' else ['Clip · 独立配置']):
-            body=QWidget();form=QFormLayout(body);form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+            body=QWidget();body.setObjectName('SettingsBody');body.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,True)
+            form=QFormLayout(body);form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
             scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(body);self.addTab(scroll,title);self.forms[title]=form
         for field in fields(scope):
             key=field['name'];kind=field['type'];options=field['options']
@@ -87,7 +90,9 @@ class SettingsForm(QTabWidget):
             elif kind=='System.Single':control=QDoubleSpinBox();control.setRange(-1e9,1e9);control.setDecimals(6)
             elif kind=='System.String' or kind in ('UnityEngine.Avatar','UnityEngine.AvatarMask','UnityEngine.AnimationClip'):control=QLineEdit()
             else:control=ExpandingJson()
-            label=QLabel((LABELS.get(key,key)+'\n'+key) if key in LABELS else key);label.setWordWrap(True)
+            label=QLabel(LABELS.get(key,re.sub(r'(?=[A-Z])','\u200b',key)));label.setWordWrap(True)
+            label.setFixedWidth(155);label.setToolTip(key)
+            if not isinstance(control,QCheckBox):control.setMinimumWidth(260);control.setMinimumHeight(34)
             if key in TUANJIE:label.setText(label.text()+'（团结扩展）')
             control.setToolTip(key+' · '+kind+('（结构化 JSON）' if isinstance(control,QPlainTextEdit) else ''))
             self.forms[group(key) if scope=='importer' else 'Clip · 独立配置'].addRow(label,control);self.controls[key]=control

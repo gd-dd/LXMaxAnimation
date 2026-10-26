@@ -30,17 +30,21 @@ class Panel(QWidget):
         self.setStyleSheet("""
             QWidget#LXAnimation {background:#f5f7f2;color:#2c382c;}
             QWidget#ClipWorkspace {background:#ffffff;border-radius:9px;}
-            QWidget#ClipWorkspace[empty="true"] {background:#e8ece6;}
-            QWidget:disabled {color:#9aa297;}
+            QWidget#ClipWorkspace[empty="true"] {background:#ffffff;}
+            QWidget#SettingsBody {background:#ffffff;}
+            QWidget:disabled {color:#9ca595;}
             QLineEdit,QComboBox,QDoubleSpinBox,QSpinBox,QPlainTextEdit {background:#fff;border:1px solid #d6dfcf;border-radius:5px;padding:5px;}
-            QLineEdit:disabled,QComboBox:disabled,QDoubleSpinBox:disabled,QSpinBox:disabled,QPlainTextEdit:disabled {background:#edf0ea;color:#a0a69b;}
+            QLineEdit:disabled,QComboBox:disabled,QDoubleSpinBox:disabled,QSpinBox:disabled,QPlainTextEdit:disabled {background:#fff;color:#9ca595;}
             QPushButton,QToolButton {padding:7px 10px;border:1px solid #ccd9bf;border-radius:6px;background:#edf3e5;color:#35512b;}
             QPushButton:hover,QToolButton:hover {background:#dcebc9;border-color:#a7bd8f;}
-            QPushButton:disabled,QToolButton:disabled {background:#e8ece4;color:#a4ad9d;border-color:#dce1d8;}
+            QPushButton:disabled,QToolButton:disabled {background:#edf3e5;color:#9ca595;border-color:#ccd9bf;}
             QTreeWidget {background:#fff;alternate-background-color:#f5f8f1;border:1px solid #d7e0d0;border-radius:7px;}
             QTreeWidget::item {padding:6px;}
             QTreeWidget::item:selected {background:#dcecc9;color:#243e1c;}
-            QTreeWidget:disabled {background:#edf0ea;color:#9aa297;}
+            QTreeWidget:disabled {background:#fff;color:#9ca595;}
+            QHeaderView::section:disabled {color:#9ca595;}
+            QTabBar::tab:disabled {color:#9ca595;}
+            QTabBar::tab:selected:disabled {background:#fff;color:#9ca595;}
             QHeaderView::section {background:#edf2e7;border:0;border-bottom:1px solid #d6e0cc;padding:7px;color:#516346;}
             QTabWidget::pane {border:1px solid #dce4d4;border-radius:5px;background:#fff;}
             QTabBar::tab {padding:8px 13px;background:#edf2e8;color:#617154;border:0;}
@@ -81,7 +85,7 @@ class Panel(QWidget):
         right=QWidget();rightbox=QVBoxLayout(right);rightbox.setContentsMargins(8,8,0,0)
         self.editor=ClipEditor();self.editor.message.connect(self.set_status);rightbox.addWidget(self.editor,1)
         footer=QHBoxLayout();footer.addWidget(QLabel('Unity 导出与后处理接口：后续接入'),1);button=QPushButton('导出到 Unity · 暂未接入');button.setEnabled(False);footer.addWidget(button);rightbox.addLayout(footer)
-        split.addWidget(right);split.setSizes([490,560]);split.setChildrenCollapsible(False)
+        split.addWidget(right);split.setSizes([360,740]);split.setStretchFactor(0,1);split.setStretchFactor(1,2);split.setChildrenCollapsible(False)
         self.status=QLabel('先连接 Max，再从角色库导入 T-pose。');self.status.setWordWrap(True);self.status.setTextFormat(Qt.TextFormat.PlainText);self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse);outer.addWidget(self.status)
         self.wheel_router=WheelRouter(self,self.editor.current_scroll)
         path=self.settings.get('library') or str(context.data_root/'library')
