@@ -8,6 +8,7 @@ import time
 import uuid
 from urllib.request import getproxies
 from .library import write_json, read_json, contained
+from . import max_connection
 
 def max_installations():
     """Discover installed hosts without embedding a machine-specific path in the package."""
@@ -54,7 +55,7 @@ def preferred_max(saved=''):
 def preferred_session(available,saved=None):
     ready=[s for s in available if s.get('protocol',1)>=2]
     remembered=next((s for s in ready if s['directory']==saved),None)
-    return remembered or (ready[0] if len(ready)==1 else None)
+    return remembered if saved else (ready[0] if len(ready)==1 else None)
 
 
 def session_root():
@@ -66,7 +67,8 @@ def sessions():
     for file in session_root().glob('*/info.json'):
         try:
             data = read_json(file)
-            if time.time() - file.stat().st_mtime < 8:
+            identity=max_connection.process_identity(data.get('pid',0))
+            if identity and str(data.get('birth',''))==identity['birth'] and time.time() - file.stat().st_mtime < 8:
                 data['directory'] = str(file.parent)
                 result.append(data)
         except (OSError, ValueError):
@@ -74,9 +76,19 @@ def sessions():
     return result
 
 
+def available_windows():
+    connected=sessions()
+    result=[]
+    for window in max_connection.windows():
+        session=next((s for s in connected if s['pid']==window['pid'] and str(s.get('birth'))==window['birth']),None)
+        result.append(dict(window,session=session))
+    return result
+
+
 def request(session, action, **args):
     folder = contained(session_root(), Path(session['directory']).relative_to(session_root()))
-    if time.time() - (folder / 'info.json').stat().st_mtime > 8:
+    live=next((s for s in sessions() if s['directory']==str(folder) and s['pid']==session['pid'] and s.get('birth')==session.get('birth')),None)
+    if not live or time.time() - (folder / 'info.json').stat().st_mtime > 8:
         raise ValueError('Max 连接已过期，请重新连接。')
     ident = uuid.uuid4().hex
     write_json(folder / (ident + '.request.json'), {'id': ident, 'action': action, 'args': args, 'expires': time.time() + 120})

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButto
     QComboBox,QFileDialog,QSplitter,QHeaderView,QDialog,QDialogButtonBox,QFormLayout,QMessageBox,QInputDialog,QToolButton,QMenu,QApplication)
 from .library import Library,KINDS,read_json,contained
 from . import integrations as host
+from . import max_connection
 from .clip_editor import ClipEditor
 from .dialogs import CharacterDialog,CaptureDialog
 from .widgets import WheelRouter,AssetTree
@@ -23,7 +24,7 @@ class Job(QThread):
 
 class Panel(QWidget):
     def __init__(self,context,parent=None):
-        super().__init__(parent);self.context=context;self.settings=context.load_settings()
+        super().__init__(parent);self.context=context;max_connection.refresh_install('max-animation',context.resource('max/bootstrap.ms'));self.settings=context.load_settings()
         self.library=None;self.active_character=None;self.active_session=self.settings.get('session');self.pending=None;self.launching=None
         self.jobs=[];self.closed=False;self.gallery=None;self.restoring=False
         self.setObjectName('LXAnimation')
@@ -84,7 +85,7 @@ class Panel(QWidget):
         row=QHBoxLayout();self.connection=QLabel('尚未连接 Max');self.connection.setWordWrap(True);row.addWidget(self.connection,1)
         self.connect_button=self.button('一键连接 Max',self.start_max);row.addWidget(self.connect_button)
         more=QToolButton();more.setText('连接 ▾');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
-        for title,fn in [('切换 Max 窗口',self.connect_max),('断开连接',self.disconnect),('更换 Max 程序',self.choose_max_program)]:menu.addAction(title,lambda fn=fn:self.guard(fn))
+        for title,fn in [('安装自动连接组件',self.install_connection),('连接帮助',self.connection_help),('切换 Max 窗口',self.connect_max),('断开连接',self.disconnect),('更换 Max 程序',self.choose_max_program)]:menu.addAction(title,lambda fn=fn:self.guard(fn))
         more.setMenu(menu);row.addWidget(more);outer.addLayout(row)
         split=QSplitter();split.setHandleWidth(8);outer.addWidget(split,1)
         left=QWidget();leftbox=QVBoxLayout(left);leftbox.setContentsMargins(0,8,8,0)
@@ -207,19 +208,29 @@ class Panel(QWidget):
             self.set_status(str(exc));self.restoring=True;self.assets.setCurrentItem(old);self.restoring=False;return
         asset=item.data(0,Qt.ItemDataRole.UserRole) if item else None
         self.guard(lambda:self.editor.set_asset(self.library,asset));self.update_selection_controls(asset)
+    def install_connection(self):
+        folder=max_connection.install('max-animation',self.context.resource('max/bootstrap.ms'))
+        QMessageBox.information(self,'自动连接已安装','以后启动 Max 自动连接；当前窗口请通过“连接帮助”运行一次脚本，无需关闭场景。\n'+str(folder))
+
     def connect_max(self):
-        self.idle();available=host.sessions()
-        available=[s for s in available if s.get('protocol',1)>=2]
+        self.idle();available=host.available_windows()
         if not available:self.start_max();return
-        if len(available)==1:
-            self.active_session=available[0]['directory'];self.auto_reconnect=False;self.persist();self.poll();return
-        dialog=QDialog(self);dialog.setWindowTitle('选择唯一连接的 Max 窗口');layout=QVBoxLayout(dialog);combo=QComboBox()
-        for session in available:combo.addItem(f"PID {session['pid']} · {session.get('scene') or '未命名场景'}",session['directory'])
+        dialog=QDialog(self);dialog.setWindowTitle('选择 Max 窗口');layout=QVBoxLayout(dialog);combo=QComboBox()
+        for window in available:
+            status='已连接' if window['session'] else '尚未连接'
+            combo.addItem(f"PID {window['pid']} · {window['title']} · {status}",window)
         layout.addWidget(combo);buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel);buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);layout.addWidget(buttons)
-        if dialog.exec():self.active_session=combo.currentData();self.auto_reconnect=False;self.persist();self.poll()
+        if not dialog.exec():return
+        selected=combo.currentData()
+        live=max_connection.process_identity(selected['pid'])
+        if not live or live['birth']!=selected['birth']:raise ValueError('该 Max 已退出，请重新选择。')
+        if not selected['session']:
+            self.connection_help();return
+        self.active_session=selected['session']['directory'];self.auto_reconnect=False;self.persist();self.poll()
     def disconnect(self):self.idle();self.active_session=None;self.auto_reconnect=False;self.persist();self.poll()
     def connection_help(self):
         script=self.context.resource('max/bootstrap.ms')
+        QApplication.clipboard().setText(str(script))
         QMessageBox.information(self,'连接 Max',f'在需要连接的 Max 窗口中，通过 Scripting → Run Script 运行：\n\n{script}\n\n随后点击“连接 Max”选择该窗口。一次只绑定一个窗口。')
     def capture(self,kind,update=None,replace=None):
         self.idle();library=self.require_library();session=self.selected_session();self.editor.flush()
@@ -292,7 +303,7 @@ class Panel(QWidget):
         if selected:
             self.active_session=selected['directory'];self.auto_reconnect=False;self.persist();self.poll()
             self.set_status('已连接 Max，无需重复启动。');return
-        if any(s.get('protocol',1)>=2 for s in available):self.connect_max();return
+        if host.available_windows():self.connect_max();return
         path=host.preferred_max(self.settings.get('maxExecutable',''))
         if not path:path=self.choose_max_program()
         if not path:return

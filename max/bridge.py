@@ -341,6 +341,14 @@ class Bridge:
     def __init__(self):
         self.root=Path(os.environ['LOCALAPPDATA'])/'LXMaxAnimation/sessions'/(str(os.getpid())+'-'+uuid.uuid4().hex[:8])
         self.root.mkdir(parents=True)
+        import ctypes
+        from ctypes import wintypes as W
+        kernel=ctypes.WinDLL('kernel32')
+        kernel.GetCurrentProcess.restype=W.HANDLE
+        kernel.GetProcessTimes.argtypes=[W.HANDLE,ctypes.POINTER(W.FILETIME),ctypes.POINTER(W.FILETIME),ctypes.POINTER(W.FILETIME),ctypes.POINTER(W.FILETIME)]
+        created,exited,cpu,user=(W.FILETIME() for _ in range(4))
+        if not kernel.GetProcessTimes(kernel.GetCurrentProcess(),ctypes.byref(created),ctypes.byref(exited),ctypes.byref(cpu),ctypes.byref(user)):raise RuntimeError('Cannot read Max process identity')
+        self.birth=str((created.dwHighDateTime<<32)|created.dwLowDateTime)
         self.busy=False
         self.timer=QTimer();self.timer.setInterval(750);self.timer.timeout.connect(self.tick);self.timer.start()
         self.tick()
@@ -350,7 +358,7 @@ class Bridge:
         if self.busy:return
         self.busy=True
         try:
-            write_json(self.root/'info.json',{'protocol':2,'pid':os.getpid(),'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0]),'frame':float(rt.sliderTime),'start':float(rt.animationRange.start),'end':float(rt.animationRange.end),'fps':int(rt.frameRate),'selection':[str(n.name) for n in rt.selection]})
+            write_json(self.root/'info.json',{'protocol':2,'pid':os.getpid(),'birth':self.birth,'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0]),'frame':float(rt.sliderTime),'start':float(rt.animationRange.start),'end':float(rt.animationRange.end),'fps':int(rt.frameRate),'selection':[str(n.name) for n in rt.selection]})
             for path in self.root.glob('*.request.json'):
                 working=path.with_suffix('.working');path.rename(working)
                 try:

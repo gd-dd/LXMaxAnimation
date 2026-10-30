@@ -96,7 +96,7 @@ with tempfile.TemporaryDirectory() as temp:
     from unittest.mock import patch,Mock
     fake_exe=base/'3dsmax.exe';fake_exe.touch();process=Mock(pid=87654);process.poll.return_value=None
     panel.disconnect()
-    with patch('ui.panel.host.sessions',return_value=[]),patch('ui.panel.host.preferred_max',return_value=None),patch('ui.panel.QFileDialog.getOpenFileName',return_value=(str(fake_exe),'')) as picker,patch('ui.panel.host.launch_max',return_value=process) as launch:
+    with patch('ui.panel.host.available_windows',return_value=[]),patch('ui.panel.host.sessions',return_value=[]),patch('ui.panel.host.preferred_max',return_value=None),patch('ui.panel.QFileDialog.getOpenFileName',return_value=(str(fake_exe),'')) as picker,patch('ui.panel.host.launch_max',return_value=process) as launch:
         panel.start_max();panel.start_max()
         assert picker.call_count==1 and launch.call_count==1
         assert panel.settings['maxExecutable']==str(fake_exe)

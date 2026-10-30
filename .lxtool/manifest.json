@@ -12,12 +12,13 @@
   "actions": {},
   "files": {
     ".lxtool/icon.png": "7a100cb728acb642ab228373a4bff7475b3704aafbcad7863531322217bebfd2",
-    ".lxtool/README.md": "9446e546a04539ff52984e19dce6cccdfabcc82e7393522decdf5510ed91fba0",
+    ".lxtool/README.md": "d1874592072b8911b795d9386cad94d12ed265db8d00149438d535e30748c765",
     ".lxtool/panel.json": "8dbce71d0ca9feb12cbf3d05b82693b3f8c7254a05f0ed91a305a8c0fb31cdd2",
     "ui/__init__.py": "832ba713741f115fd0f348ffeb5a036e7530f4a6702e2dd341b135f0d17c6b5a",
+    "ui/max_connection.py": "bfcea8f6cd5a0f3534be1619bb08fc43fe5341739da6faa533709a0e7ac9b28b",
     "ui/library.py": "6254ae3f3bc69600aff895294ffdae42c520ba7f1d948c456466d27fed7c2d0c",
-    "ui/integrations.py": "51f2c0b4cb2ec41bfe8fa35109c2d35cfa1c5069f4bec651eff18664dd785e7b",
-    "ui/panel.py": "64739d904580824bed0f08fbabc69ca218448270a5b2d11bced8210dc028177b",
+    "ui/integrations.py": "99fe30489409ec23f00e378d28b937a1e0c0a0a41e3d48e79173e652b70573d5",
+    "ui/panel.py": "465f84566ff369c4f22a70b52b842ed79b3a188359372abc3d1a042b448621c7",
     "ui/clips.py": "834a201ffb12269e18600b2a81b9eb445317aaa4575a4895ab309e0e183cfebf",
     "ui/clip_editor.py": "3f32d96176523322e4b371fca20d5fb03a23c8d4bc16711db10d004360e58896",
     "ui/dialogs.py": "e0cf015afdcd0a80e80365ee79e3f19ac6b22958544ee99095401575002f381a",
@@ -27,6 +28,6 @@
     "ui/icons/chevron-down.svg": "5a754cf77e5b0e936a71a9300ffcab6d97e405ecb6bc06fa169c26b234511e0b",
     "ui/icons/chevron-up.svg": "c6f9c0ce9ab58e0acbf8ca9dcced8ded341ce07d92d07c545f7915b0e8de2a7e",
     "max/bootstrap.ms": "4d571cdb39f236f9fe460213246d7b962948c9efe9eebe7792ca4a43aa3f6a53",
-    "max/bridge.py": "a64dc251d9612ebac71d507a4a6b80e63446b065d465219baa5b836243924dff"
+    "max/bridge.py": "0f63b5e30ad4c7d6a50fc7e14a7a7b187ab8a3b68d647c5d9cebb13dd7fbd7f1"
   }
 }
