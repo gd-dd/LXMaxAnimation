@@ -3,7 +3,7 @@
   "kind": "lx-tool",
   "name": "LXMaxAnimation",
   "description": "连接 Max，以 T-pose 管理角色、完整动画场景和 Pose，编辑独立 Clip 配置。",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "category": "动画管线",
   "icon": ".lxtool/icon.png",
   "readme": ".lxtool/README.md",
@@ -12,7 +12,7 @@
   "actions": {},
   "files": {
     ".lxtool/icon.png": "7a100cb728acb642ab228373a4bff7475b3704aafbcad7863531322217bebfd2",
-    ".lxtool/README.md": "8496fa06c4387d97c7a6ae5fce7868a3afbe0d6dd1bdf9934ec52de7fb943421",
+    ".lxtool/README.md": "9446e546a04539ff52984e19dce6cccdfabcc82e7393522decdf5510ed91fba0",
     ".lxtool/panel.json": "8dbce71d0ca9feb12cbf3d05b82693b3f8c7254a05f0ed91a305a8c0fb31cdd2",
     "ui/__init__.py": "832ba713741f115fd0f348ffeb5a036e7530f4a6702e2dd341b135f0d17c6b5a",
     "ui/library.py": "6254ae3f3bc69600aff895294ffdae42c520ba7f1d948c456466d27fed7c2d0c",
