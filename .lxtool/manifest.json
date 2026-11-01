@@ -3,7 +3,7 @@
   "kind": "lx-tool",
   "name": "LXMaxAnimation",
   "description": "连接 Max，以 T-pose 管理角色、完整动画场景和 Pose，编辑独立 Clip 配置。",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "category": "动画管线",
   "icon": ".lxtool/icon.png",
   "readme": ".lxtool/README.md",
@@ -29,5 +29,7 @@
     "ui/icons/chevron-up.svg": "c6f9c0ce9ab58e0acbf8ca9dcced8ded341ce07d92d07c545f7915b0e8de2a7e",
     "max/bootstrap.ms": "4d571cdb39f236f9fe460213246d7b962948c9efe9eebe7792ca4a43aa3f6a53",
     "max/bridge.py": "0f63b5e30ad4c7d6a50fc7e14a7a7b187ab8a3b68d647c5d9cebb13dd7fbd7f1"
-  }
+  },
+  "releaseNotes": "支持发现并选择所有运行中的 Max 窗口；新增用户级自动连接组件及既有窗口连接脚本入口，保留明确目标并防止自动切换。",
+  "publishedAt": "2026-11-01"
 }
