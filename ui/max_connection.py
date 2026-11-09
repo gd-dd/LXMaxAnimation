@@ -4,7 +4,6 @@ import ctypes
 from ctypes import wintypes as W
 from pathlib import Path
 import uuid
-import xml.etree.ElementTree as ET
 
 
 def process_identity(pid):
@@ -57,12 +56,16 @@ def install(tool_id, bootstrap):
     # Only a bridge is loaded; never change or save the user's scene.
     (folder/'loader.ms').write_text('try (if doesFileExist @"'+path+'" do fileIn @"'+path+'" quiet:true) catch (format "LX connection: %\\n" (getCurrentException()))',encoding='utf-8-sig')
     code='{'+str(uuid.uuid5(uuid.NAMESPACE_URL,'lx-max-connection/'+tool_id))+'}'
-    root=ET.Element('ApplicationPackage',SchemaVersion='1.0',AutodeskProduct='3ds Max',ProductType='Application',Name='LX '+tool_id+' connection',AppVersion='1.0.0',UpgradeCode=code,ProductCode=code)
-    ET.SubElement(root,'CompanyDetails')
-    components=ET.SubElement(root,'Components',Description='post-start-up scripts parts')
-    ET.SubElement(components,'RuntimeRequirements',OS='Win64',Platform='3ds Max',SeriesMin='2024',SeriesMax='2027')
-    ET.SubElement(components,'ComponentEntry',ModuleName='./loader.ms')
-    ET.ElementTree(root).write(folder/'PackageContents.xml',encoding='utf-8',xml_declaration=True)
+    def attribute(value):
+        return value.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('"','&quot;').replace("'",'&apos;')
+    # Frozen LXTool 0.0.5 does not bundle the optional stdlib XML package.
+    xml=('<?xml version="1.0" encoding="utf-8"?>\n'
+         '<ApplicationPackage SchemaVersion="1.0" AutodeskProduct="3ds Max" ProductType="Application" '
+         'Name="'+attribute('LX '+tool_id+' connection')+'" AppVersion="1.0.0" UpgradeCode="'+code+'" ProductCode="'+code+'">'
+         '<CompanyDetails/><Components Description="post-start-up scripts parts">'
+         '<RuntimeRequirements OS="Win64" Platform="3ds Max" SeriesMin="2024" SeriesMax="2027"/>'
+         '<ComponentEntry ModuleName="./loader.ms"/></Components></ApplicationPackage>')
+    (folder/'PackageContents.xml').write_text(xml,encoding='utf-8')
     return folder
 
 

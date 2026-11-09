@@ -22,4 +22,13 @@ class ConnectionTests(unittest.TestCase):
    self.assertEqual(max_connection.install('test',script),first)
    self.assertEqual(before,(first/'PackageContents.xml').read_bytes())
    self.assertIn(str(script),(first/'loader.ms').read_text('utf-8-sig'))
+ def test_installed_xml_preserves_name_and_loader(self):
+  import xml.etree.ElementTree as ET
+  with tempfile.TemporaryDirectory() as temp,patch.dict('os.environ',{'APPDATA':temp}):
+   script=Path(temp)/'bridge.ms';script.write_text('-- test')
+   folder=max_connection.install("test&'name",script)
+   root=ET.parse(folder/'PackageContents.xml').getroot()
+   self.assertEqual(root.attrib['Name'],"LX test&'name connection")
+   self.assertEqual(root.find('Components/ComponentEntry').attrib['ModuleName'],'./loader.ms')
+   self.assertEqual(root.attrib['ProductCode'],root.attrib['UpgradeCode'])
 if __name__=='__main__':unittest.main()
