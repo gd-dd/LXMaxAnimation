@@ -12,7 +12,7 @@
   "actions": {},
   "files": {
     ".lxtool/icon.png": "7a100cb728acb642ab228373a4bff7475b3704aafbcad7863531322217bebfd2",
-    ".lxtool/README.md": "9908ae7474f700a0a8e8e827ac17022c7a9be8e03b73d64e1d8df286cdee2f9d",
+    ".lxtool/README.md": "276b9d2bef621e8bd93a1fc2323ff68ba806013d1aa4bbe5bd447627dbb8125d",
     ".lxtool/panel.json": "8dbce71d0ca9feb12cbf3d05b82693b3f8c7254a05f0ed91a305a8c0fb31cdd2",
     "ui/__init__.py": "832ba713741f115fd0f348ffeb5a036e7530f4a6702e2dd341b135f0d17c6b5a",
     "ui/max_connection.py": "127487795232286b023aaaae265af9277f2cf024af92cb2c2ca15c24c485e4dd",
@@ -28,7 +28,7 @@
     "ui/icons/chevron-down.svg": "5a754cf77e5b0e936a71a9300ffcab6d97e405ecb6bc06fa169c26b234511e0b",
     "ui/icons/chevron-up.svg": "c6f9c0ce9ab58e0acbf8ca9dcced8ded341ce07d92d07c545f7915b0e8de2a7e",
     "max/bootstrap.ms": "4d571cdb39f236f9fe460213246d7b962948c9efe9eebe7792ca4a43aa3f6a53",
-    "max/bridge.py": "0f63b5e30ad4c7d6a50fc7e14a7a7b187ab8a3b68d647c5d9cebb13dd7fbd7f1"
+    "max/bridge.py": "de3e3a355dd6c0f19da093d17f2aa103bdbac47ad06fe6a4861feff8d336fad0"
   },
   "releaseNotes": "支持发现并选择所有运行中的 Max 窗口；新增用户级自动连接组件及既有窗口连接脚本入口，保留明确目标并防止自动切换。",
   "publishedAt": "2026-11-01"

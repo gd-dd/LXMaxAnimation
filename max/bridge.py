@@ -189,24 +189,32 @@ def apply_pose(path, rig='Generic'):
         if parent in records:add(parent)
         ordered.append(name)
     for name in records:add(name)
+    failure = None
     with pymxs.undo(True,'LXMaxAnimation Pose'),pymxs.animate(True):
-        if rig=='CAT':
-            cat=rig_root([scene[name][0] for name in records],rig)
-            if int(cat.NumLayers)<1:cat.AppendLayer('LX Pose',rt.Name('Absolute'))
-            cat.CATMode=1
-        for name in ordered:
-            node=scene[name][0]; local=matrix(records[name]['local'])
-            world=local * node.parent.transform if node.parent else local
-            if 'biped' in str(rt.classOf(node)).lower():
-                rt.biped.setTransform(node,rt.Name('rotation'),world.rotationPart,True)
-                rt.biped.setTransform(node,rt.Name('pos'),world.translationPart,True)
-            else:
-                node.transform=world
-                if rig!='CAT':rt.addNewKey(node.controller,rt.sliderTime)
-        for name in ordered:
-            for track in records[name].get('tracks',[]):
-                sub=resolve_track(scene[name][0],track);sub.value=track['value']
-                rt.addNewKey(sub.controller,rt.sliderTime)
+        try:
+            if rig=='CAT':
+                cat=rig_root([scene[name][0] for name in records],rig)
+                if int(cat.NumLayers)<1:cat.AppendLayer('LX Pose',rt.Name('Absolute'))
+                cat.CATMode=1
+            for name in ordered:
+                node=scene[name][0]; local=matrix(records[name]['local'])
+                world=local * node.parent.transform if node.parent else local
+                if 'biped' in str(rt.classOf(node)).lower():
+                    rt.biped.setTransform(node,rt.Name('rotation'),world.rotationPart,True)
+                    rt.biped.setTransform(node,rt.Name('pos'),world.translationPart,True)
+                else:
+                    node.transform=world
+                    if rig!='CAT':rt.addNewKey(node.controller,rt.sliderTime)
+            for name in ordered:
+                for track in records[name].get('tracks',[]):
+                    sub=resolve_track(scene[name][0],track);sub.value=track['value']
+                    rt.addNewKey(sub.controller,rt.sliderTime)
+        except BaseException as exc:
+            # Max undo rolls back but suppresses Python exceptions on exit.
+            failure = exc
+            raise
+    if failure is not None:
+        raise failure
     return {'ok':True,'message':f'Pose 已应用到当前帧：{len(ordered)} 个节点。'}
 
 
