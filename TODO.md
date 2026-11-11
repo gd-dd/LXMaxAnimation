@@ -80,8 +80,8 @@ UI 本轮证据：20 项单元测试通过；真实 Qt 事件测试覆盖聚焦�
 - [x] 配置折叠/切页保留草稿；选择、筛选及窗口重开状态恢复。
 - [x] 离屏Qt正常/700/960/1280窗口与150%DPI各10组、31项单元、UI/source native及冻结加载通过。
 - [ ] 独立局部Max业务门槛（总控串行安排，未启动宿主）。
-- [x] 新0.0.4候选清单/ZIP c2085f9b679e708175ed074535f4c262401e9c689b48ff66ff73de23c59a8f22已报总控。
+- [x] 新0.0.4候选清单/ZIP c0d79a1b95208a40bcab64ba64c5a6823da0b967b7354ae1dd6836eb3628f78c已报总控。
 - [ ] 放行后新不可变Release与公开回读；当前窗口/实际更新由总控验收。
 Unity真实接入继续暂停。保留本文件原有未提交勾选改动；历史版本不可覆盖。
 
-证据：E:/project/LXTools/acceptance/animation-ui-2026-11-12；layout/report.json及layout-dpi150/report.json各10组，frozen-final/report.json frozen=true/004加载成功。无屏幕输入、无用户Max/资产库改动。
+证据：E:/project/LXTools/acceptance/animation-ui-2026-11-12；layout/report.json及layout-dpi150/report.json各10组，frozen-wheel/report.json frozen=true/004加载成功。无屏幕输入、无用户Max/资产库改动。

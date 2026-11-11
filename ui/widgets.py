@@ -37,7 +37,7 @@ class WheelRouter(QObject):
         if not (obj is self.root or self.root.isAncestorOf(obj)):return False
         node=obj;protected=False;scroll=None
         while node is not None and node is not self.root:
-            protected=protected or isinstance(node,(QAbstractSpinBox,QComboBox,QPlainTextEdit,QTabBar))
+            protected=protected or isinstance(node,(QAbstractSpinBox,QComboBox,ExpandingJson,QTabBar))
             if isinstance(node,QScrollArea):scroll=node;break
             node=node.parentWidget()
         if not protected:return False

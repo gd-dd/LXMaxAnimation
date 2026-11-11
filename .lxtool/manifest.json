@@ -22,7 +22,7 @@
     "ui/clips.py": "834a201ffb12269e18600b2a81b9eb445317aaa4575a4895ab309e0e183cfebf",
     "ui/clip_editor.py": "af55d0f52a6ca4331e32528d18c93061760de9c1de7f031e1ebff61102917437",
     "ui/dialogs.py": "27e56e5af2e5272b88fee6470a0a5f4f760be6a5a42b37c0d16bc02197bc1806",
-    "ui/widgets.py": "8372c8dbb06df296e95d4cd768ffe2679a9981bc0a3bb88b95f92c0ad50d0498",
+    "ui/widgets.py": "020da43fdfe7c51ef7cb0c027e3e61afa07d5d30d717330309fa09690d386df5",
     "ui/fbx_settings.py": "c1ff75b714af2d811a776a0b258f5b5f8ebda60b47ac2e04b7b7abd4d8a515d7",
     "ui/unity-schema.json": "abe76da07ee01974a15813d9a64984714a6f5b5792f56dddf6e2520bda9c38b7",
     "ui/icons/chevron-down.svg": "5a754cf77e5b0e936a71a9300ffcab6d97e405ecb6bc06fa169c26b234511e0b",

@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QApplication,QWidget,QVBoxLayout
 from PySide6.QtCore import Qt,QPoint,QPointF
 from PySide6.QtGui import QWheelEvent,QFontDatabase
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QLineEdit,QScrollArea
+from PySide6.QtWidgets import QLineEdit,QScrollArea,QDialog,QPlainTextEdit
 from ui.panel import create_panel
 from ui.library import Library,write_json
 from ui import clips
@@ -64,6 +64,11 @@ with tempfile.TemporaryDirectory() as temp:
     app.sendEvent(spin,wheel);app.processEvents()
     assert spin.value()==value and scroll.verticalScrollBar().value()>0
     combo=panel.editor.target;index=combo.currentIndex();combo.setFocus();app.sendEvent(combo,wheel);assert combo.currentIndex()==index
+    # Normal full-text viewers keep their own scrolling; only expanding JSON uses the page scrollbar.
+    viewer=QDialog(panel);viewer.resize(350,160);viewer_box=QVBoxLayout(viewer)
+    text=QPlainTextEdit('\n'.join(str(i) for i in range(100)));viewer_box.addWidget(text);viewer.show();app.processEvents()
+    app.sendEvent(text.viewport(),wheel);app.processEvents();assert text.verticalScrollBar().value()>0
+    viewer.close()
     # No page scrollbar is nested inside another page scrollbar.
     for area in panel.editor.findChildren(QScrollArea):
         parent=area.parentWidget()
