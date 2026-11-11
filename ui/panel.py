@@ -2,16 +2,16 @@
 from pathlib import Path
 import shutil
 import time
-from PySide6.QtCore import Qt,QTimer,QThread,Signal
+from PySide6.QtCore import Qt,QTimer,QThread,Signal,QSize
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QLineEdit,QTreeWidget,QTreeWidgetItem,
-    QComboBox,QFileDialog,QSplitter,QHeaderView,QDialog,QDialogButtonBox,QFormLayout,QMessageBox,QInputDialog,QToolButton,QMenu,QApplication)
+    QComboBox,QFileDialog,QSplitter,QHeaderView,QTabBar,QSizePolicy,QLayout,QDialog,QDialogButtonBox,QFormLayout,QMessageBox,QInputDialog,QToolButton,QMenu,QApplication)
 from .library import Library,KINDS,read_json,contained
 from . import integrations as host
 from . import max_connection
 from .clip_editor import ClipEditor
 from .dialogs import CharacterDialog,CaptureDialog
-from .widgets import WheelRouter,AssetTree
+from .widgets import WheelRouter,AssetTree,ElidedLabel
 
 
 class Job(QThread):
@@ -77,44 +77,64 @@ class Panel(QWidget):
             QScrollBar:vertical {width:10px;background:#f0f3eb;}
             QScrollBar::handle:vertical {background:#b5c5a5;border-radius:4px;min-height:24px;}
         """.replace('__ICONS__',(Path(__file__).parent/'icons').as_posix()))
-        outer=QVBoxLayout(self);outer.setContentsMargins(14,10,14,10)
-        row=QHBoxLayout();self.avatar=QLabel();self.avatar.setFixedSize(58,58);row.addWidget(self.avatar)
-        title=QVBoxLayout();self.character_title=QLabel('选择一个角色');self.character_title.setStyleSheet('font-size:22px;font-weight:650');title.addWidget(self.character_title)
-        title.addWidget(QLabel('角色 · 动画 · Pose · Clip'));row.addLayout(title,1)
-        row.addWidget(self.button('角色库',self.open_gallery));row.addWidget(self.button('资产库 / 同步',self.library_settings));outer.addLayout(row)
-        row=QHBoxLayout();self.connection=QLabel('尚未连接 Max');self.connection.setWordWrap(True);row.addWidget(self.connection,1)
-        self.connect_button=self.button('一键连接 Max',self.start_max);row.addWidget(self.connect_button)
-        more=QToolButton();more.setText('连接 ▾');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
+        outer=QVBoxLayout(self);outer.setContentsMargins(10,8,10,8);outer.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        self.setMinimumSize(360,300)
+        row=QHBoxLayout();self.avatar=QLabel();self.avatar.setFixedSize(38,38);row.addWidget(self.avatar)
+        self.character_title=ElidedLabel('选择一个角色');self.character_title.setStyleSheet('font-size:18px;font-weight:650');row.addWidget(self.character_title,1)
+        row.addWidget(self.button('角色库',self.open_gallery))
+        self.connect_button=self.button('连接 Max',self.start_max);row.addWidget(self.connect_button)
+        more=QToolButton();more.setText('更多');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
+        menu.addAction('资产库 / 同步',lambda:self.guard(self.library_settings));menu.addSeparator()
         for title,fn in [('安装自动连接组件',self.install_connection),('连接帮助',self.connection_help),('切换 Max 窗口',self.connect_max),('断开连接',self.disconnect),('更换 Max 程序',self.choose_max_program)]:menu.addAction(title,lambda fn=fn:self.guard(fn))
         more.setMenu(menu);row.addWidget(more);outer.addLayout(row)
-        split=QSplitter();split.setHandleWidth(8);outer.addWidget(split,1)
-        left=QWidget();leftbox=QVBoxLayout(left);leftbox.setContentsMargins(0,8,8,0)
-        row=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText('搜索动画 / Pose / 备注');self.search.textChanged.connect(lambda:self.guard(self.refresh_assets))
-        self.kind=QComboBox();self.kind.addItem('全部','');[self.kind.addItem(v,k) for k,v in KINDS.items()];self.kind.currentIndexChanged.connect(lambda:self.guard(self.refresh_assets))
-        row.addWidget(self.search,1);row.addWidget(self.kind);leftbox.addLayout(row)
+        self.connection=ElidedLabel('尚未连接 Max');outer.addWidget(self.connection)
+        self.narrow_tabs=QTabBar();self.narrow_tabs.addTab('资产浏览');self.narrow_tabs.addTab('资产 / Clip 编辑');self.narrow_tabs.setExpanding(True)
+        self.narrow_tabs.currentChanged.connect(self.update_workspace);outer.addWidget(self.narrow_tabs);self.narrow_tabs.hide()
+        self.split=QSplitter();self.split.setHandleWidth(8);outer.addWidget(self.split,1)
+        self.left=left=QWidget();left.setMinimumWidth(220);leftbox=QVBoxLayout(left);leftbox.setContentsMargins(0,4,4,0)
+        self.search=QLineEdit();self.search.setPlaceholderText('搜索动画 / Pose / 备注');self.search.textChanged.connect(lambda:self.guard(self.refresh_assets));leftbox.addWidget(self.search)
+        row=QHBoxLayout();self.kind=QComboBox();self.kind.addItem('全部资产','');[self.kind.addItem(v,k) for k,v in KINDS.items()]
+        self.kind.currentIndexChanged.connect(lambda:self.guard(self.refresh_assets));row.addWidget(self.kind,1)
+        create=QToolButton();create.setText('＋ 从 Max 导入');create.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(create)
+        menu.addAction('动画',lambda:self.guard(lambda:self.capture('animation')));menu.addAction('单帧 Pose',lambda:self.guard(lambda:self.capture('pose')));menu.addSeparator();menu.addAction('刷新列表',lambda:self.guard(self.refresh_assets));create.setMenu(menu);row.addWidget(create);leftbox.addLayout(row)
         self.assets=AssetTree();self.assets.setAlternatingRowColors(True);self.assets.setHeaderLabels(['名称','类型','版本','备注']);self.assets.setRootIsDecorated(False);self.assets.setSortingEnabled(True);self.assets.sortItems(0,Qt.SortOrder.AscendingOrder)
         self.assets.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch);self.assets.header().setSectionResizeMode(3,QHeaderView.ResizeMode.Stretch)
-        self.assets.setColumnWidth(1,95);self.assets.setColumnWidth(2,65)
+        self.assets.setColumnWidth(1,72);self.assets.setColumnWidth(2,58)
         self.assets.currentItemChanged.connect(self.asset_changed);self.assets.itemDoubleClicked.connect(lambda *_:self.guard(lambda:self.send_to_max(self.selected_asset())))
-        self.assets.itemChanged.connect(self.asset_metadata_changed)
-        leftbox.addWidget(self.assets,1)
-        row=QHBoxLayout();create=QToolButton();create.setText('＋ 从 Max 导入');create.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(create)
-        menu.addAction('动画',lambda:self.guard(lambda:self.capture('animation')));menu.addAction('单帧 Pose',lambda:self.guard(lambda:self.capture('pose')));menu.addSeparator();menu.addAction('刷新列表',lambda:self.guard(self.refresh_assets));create.setMenu(menu);row.addWidget(create)
-        self.selection_label=QLabel('未选择资产');row.addWidget(self.selection_label,1)
-        self.save_button=self.button('从 Max 保存',self.overwrite);self.save_button.setEnabled(False);row.addWidget(self.save_button);leftbox.addLayout(row)
-        hint=QLabel('双击加载到 Max · 选中后再单击名称 / 备注编辑\n仅“从 Max 保存”写回库；不自动备份当前场景。');hint.setWordWrap(True);leftbox.addWidget(hint)
-        split.addWidget(left)
-        right=QWidget();rightbox=QVBoxLayout(right);rightbox.setContentsMargins(8,8,0,0)
+        self.assets.itemChanged.connect(self.asset_metadata_changed);leftbox.addWidget(self.assets,1)
+        hint=ElidedLabel('双击加载到 Max · 选中后单击名称 / 备注编辑');leftbox.addWidget(hint)
+        self.split.addWidget(left)
+        self.right=right=QWidget();right.setMinimumWidth(340);rightbox=QVBoxLayout(right);rightbox.setContentsMargins(4,4,0,0)
+        row=QHBoxLayout();self.selection_label=ElidedLabel('未选择资产');self.selection_label.setStyleSheet('font-weight:600');row.addWidget(self.selection_label,1)
+        self.apply_button=self.button('应用到 Max',lambda:self.send_to_max(self.selected_asset()));self.apply_button.setEnabled(False);row.addWidget(self.apply_button)
+        self.save_button=self.button('从 Max 保存',self.overwrite);self.save_button.setEnabled(False);row.addWidget(self.save_button);rightbox.addLayout(row)
+        self.asset_summary=ElidedLabel('从左侧选择资产；从 Max 保存才会更新库。');rightbox.addWidget(self.asset_summary)
         self.editor=ClipEditor();self.editor.message.connect(self.set_status);rightbox.addWidget(self.editor,1)
-        footer=QHBoxLayout();footer.addWidget(QLabel('Unity 导出与后处理接口：后续接入'),1);button=QPushButton('导出到 Unity · 暂未接入');button.setEnabled(False);footer.addWidget(button);rightbox.addLayout(footer)
-        split.addWidget(right);split.setSizes([360,740]);split.setStretchFactor(0,1);split.setStretchFactor(1,2);split.setChildrenCollapsible(False)
-        self.status=QLabel('先连接 Max，再从角色库导入 T-pose。');self.status.setWordWrap(True);self.status.setTextFormat(Qt.TextFormat.PlainText);self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse);outer.addWidget(self.status)
+        self.split.addWidget(right);self.split.setSizes([300,700]);self.split.setStretchFactor(0,1);self.split.setStretchFactor(1,2);self.split.setChildrenCollapsible(False)
+        self.status=ElidedLabel('先连接 Max，再从角色库导入 T-pose。');outer.addWidget(self.status)
+        draft_path=context.data_root/'clip-drafts.json'
+        if draft_path.is_file():self.guard(lambda:setattr(self.editor,'recovery',read_json(draft_path)))
+        self.editor.restore_view(self.settings.get('editorView',{}))
+        self.remembered_assets=self.settings.get('selectedAssets',{})
+        self.search.setText(self.settings.get('assetSearch',''));self.kind.setCurrentIndex(max(0,self.kind.findData(self.settings.get('assetKind',''))))
         self.wheel_router=WheelRouter(self,self.editor.current_scroll)
         path=self.settings.get('library') or str(context.data_root/'library')
         self.guard(lambda:self.load_library(path))
         self.active_session=self.settings.get('session')
         self.auto_reconnect=True
-        self.timer=QTimer(self);self.timer.setInterval(750);self.timer.timeout.connect(self.poll);self.timer.start();self.poll()
+        self.timer=QTimer(self);self.timer.setInterval(750);self.timer.timeout.connect(self.poll);self.timer.start();self.poll();self.update_workspace()
+
+    def minimumSizeHint(self):return QSize(360,300)
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        if hasattr(self,'narrow_tabs'):self.update_workspace()
+
+    def update_workspace(self,*_):
+        narrow=self.width()<820
+        self.narrow_tabs.setVisible(narrow)
+        self.left.setVisible(not narrow or self.narrow_tabs.currentIndex()==0)
+        self.right.setVisible(not narrow or self.narrow_tabs.currentIndex()==1)
 
     def button(self,title,fn):
         b=QPushButton(title);b.clicked.connect(lambda _:self.guard(fn));return b
@@ -127,7 +147,7 @@ class Panel(QWidget):
     def idle(self):
         if self.busy():raise ValueError('当前任务尚未完成，请等待。')
     def persist(self):
-        self.settings.update(character=self.active_character,session=self.active_session)
+        self.settings.update(character=self.active_character,session=self.active_session,editorView=self.editor.view_state(),selectedAssets=self.remembered_assets,assetSearch=self.search.text(),assetKind=self.kind.currentData())
         if self.library:self.settings['library']=str(self.library.root)
         self.context.save_settings(self.settings)
     def run_job(self,fn,label,done=None):
@@ -169,7 +189,7 @@ class Panel(QWidget):
             if info.get('avatar'):
                 target=contained(self.library.root/'characters'/self.active_character,info['avatar'])
                 if target.is_file():icon=target
-        self.avatar.setPixmap(QPixmap(str(icon)).scaled(58,58,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
+        self.avatar.setPixmap(QPixmap(str(icon)).scaled(38,38,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
     def choose_character(self,name):
         self.idle();self.editor.flush();self.active_character=name;self.editor.set_asset(None,None)
         self.update_character_header();self.refresh_assets(flush=False);self.persist()
@@ -181,7 +201,7 @@ class Panel(QWidget):
     def refresh_assets(self,*_,flush=True,select_id=None):
         if not self.library:return
         if flush:self.editor.flush()
-        if not select_id and self.assets.currentItem():select_id=self.selected_asset()['id']
+        if not select_id:select_id=self.selected_asset()['id'] if self.assets.currentItem() else self.remembered_assets.get(self.active_character)
         self.restoring=True;self.assets.setSortingEnabled(False);self.assets.clear()
         data,errors=self.library.list_assets(self.active_character) if self.active_character else ([],[])
         versions={}
@@ -191,7 +211,7 @@ class Panel(QWidget):
         for asset in data:
             if self.kind.currentData() and asset['kind']!=self.kind.currentData():continue
             if self.search.text().casefold() not in (asset['name']+' '+asset.get('notes','')).casefold():continue
-            item=QTreeWidgetItem([asset['name'],KINDS[asset['kind']],f"v{asset['_displayVersion']:03d}",asset.get('notes','')]);item.setToolTip(2,asset['revision']);item.setData(0,Qt.ItemDataRole.UserRole,asset)
+            item=QTreeWidgetItem([asset['name'],KINDS[asset['kind']],f"v{asset['_displayVersion']:03d}",asset.get('notes','')]);item.setToolTip(0,asset['name']);item.setToolTip(3,asset.get('notes',''));item.setToolTip(2,asset['revision']);item.setData(0,Qt.ItemDataRole.UserRole,asset)
             item.setFlags(item.flags()|Qt.ItemFlag.ItemIsEditable)
             self.assets.addTopLevelItem(item)
             if asset['id']==select_id:chosen=item
@@ -208,6 +228,7 @@ class Panel(QWidget):
             self.set_status(str(exc));self.restoring=True;self.assets.setCurrentItem(old);self.restoring=False;return
         asset=item.data(0,Qt.ItemDataRole.UserRole) if item else None
         self.guard(lambda:self.editor.set_asset(self.library,asset));self.update_selection_controls(asset)
+        if asset and self.narrow_tabs.isVisible():self.narrow_tabs.setCurrentIndex(1)
     def install_connection(self):
         folder=max_connection.install('max-animation',self.context.resource('max/bootstrap.ms'))
         QMessageBox.information(self,'自动连接已安装','以后启动 Max 自动连接；当前窗口请通过“连接帮助”运行一次脚本，无需关闭场景。\n'+str(folder))
@@ -266,7 +287,14 @@ class Panel(QWidget):
         self.run_job(lambda:library.verify(asset),'正在校验库文件…',ready)
     def update_selection_controls(self,asset):
         self.save_button.setEnabled(asset is not None)
+        self.apply_button.setEnabled(asset is not None)
+        if asset:self.remembered_assets[self.active_character]=asset['id']
         self.selection_label.setText(asset['name'] if asset else '未选择资产')
+        if asset:
+            meta=asset.get('metadata',{});kind=KINDS[asset['kind']]
+            detail=f"{kind} · {meta.get('rig','Generic')} · {meta.get('start','—')} — {meta.get('end','—')} 帧 · {meta.get('fps','—')} FPS"
+            self.asset_summary.setText(detail+(' · '+asset.get('notes','') if asset.get('notes') else ''))
+        else:self.asset_summary.setText('从左侧选择资产；从 Max 保存才会更新库。')
         self.selection_label.setToolTip(asset['name'] if asset else '')
 
     def asset_metadata_changed(self,item,column):
@@ -282,7 +310,7 @@ class Panel(QWidget):
             asset[key]=value;self.restoring=True;item.setData(0,Qt.ItemDataRole.UserRole,asset);self.restoring=False
             self.update_selection_controls(asset)
             if self.editor.asset and self.editor.asset['id']==asset['id']:
-                self.editor.asset[key]=value;self.editor.title.setText(asset['name']+' · Clip 拆分')
+                self.editor.asset[key]=value;self.editor.title.setText('Clip 拆分')
             self.set_status('资产信息已保存。')
         except Exception as exc:
             self.restoring=True;item.setText(column,asset['name' if column==0 else 'notes']);self.restoring=False
@@ -375,11 +403,11 @@ class Panel(QWidget):
     def shutdown(self):
         if self.closed:return
         try:self.editor.flush()
-        except Exception:
-            if self.editor.data:
-                from .library import write_json
-                write_json(self.context.data_root/'clip-recovery.json',{'assetId':self.editor.asset['id'],'lastValid':self.editor.data,'extraText':self.editor.extra.toPlainText()})
+        except Exception:self.editor.keep_draft()
+        from .library import write_json
+        write_json(self.context.data_root/'clip-drafts.json',self.editor.recovery)
         self.closed=True;self.timer.stop();self.wheel_router.stop()
+        self.persist()
         if self.gallery:self.gallery.close()
         for job in self.jobs:
             if job.isRunning():job.setParent(None);_finishing.append(job);job.finished.connect(lambda j=job:_release(j))

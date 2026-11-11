@@ -2,7 +2,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon,QImage
 from PySide6.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QLineEdit,QComboBox,
-    QCheckBox,QFormLayout,QDialogButtonBox,QListWidget,QListWidgetItem,QFileDialog,QInputDialog,QMessageBox)
+    QCheckBox,QFormLayout,QDialogButtonBox,QListWidget,QListWidgetItem,QFileDialog,QInputDialog,QMessageBox,QToolButton,QMenu)
 from .library import safe_name,contained
 
 
@@ -42,14 +42,18 @@ class CharacterDialog(QDialog):
         layout=QVBoxLayout(self);row=QHBoxLayout()
         self.search=QLineEdit();self.search.setPlaceholderText('搜索角色…');self.search.textChanged.connect(self.refresh)
         self.category=QComboBox();self.category.currentIndexChanged.connect(self.refresh)
-        row.addWidget(self.search,1);row.addWidget(self.category);row.addWidget(self.button('＋ 分类',self.add_category));layout.addLayout(row)
+        self.category.setMinimumContentsLength(6);self.category.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        row.addWidget(self.search,1);row.addWidget(self.category);layout.addLayout(row)
         self.cards=QListWidget();self.cards.setViewMode(QListWidget.ViewMode.IconMode);self.cards.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.cards.setMovement(QListWidget.Movement.Static);self.cards.setIconSize(QSize(110,110));self.cards.setGridSize(QSize(170,160));self.cards.setWordWrap(True)
         self.cards.itemDoubleClicked.connect(lambda *_:self.panel.guard(self.choose));layout.addWidget(self.cards,1)
         row=QHBoxLayout()
-        for title,fn in [('从 Max 导入角色',lambda:panel.capture('model')),('更新 T-pose',self.update),('导出角色到 Max',self.export),('更换头像',self.avatar),('设置分类',self.set_category)]:row.addWidget(self.button(title,fn))
+        row.addWidget(self.button('从 Max 导入角色',lambda:panel.capture('model')))
+        more=QToolButton();more.setText('角色管理');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
+        for title,fn in [('更新 T-pose',self.update),('导出角色到 Max',self.export),('更换头像',self.avatar),('设置分类',self.set_category),('新建分类',self.add_category)]:menu.addAction(title,lambda fn=fn:self.panel.guard(fn))
+        more.setMenu(menu);row.addWidget(more);row.addStretch();row.addWidget(self.button('选择角色',self.choose))
         layout.addLayout(row)
-        row=QHBoxLayout();row.addWidget(QLabel('双击头像选择角色；更新 T-pose 保留已有动画和 Pose。'));row.addStretch();row.addWidget(self.button('选择角色',self.choose));layout.addLayout(row)
+        hint=QLabel('双击头像选择角色；更新 T-pose 保留已有动画和 Pose。');hint.setWordWrap(True);layout.addWidget(hint)
         self.reload_categories()
 
     def button(self,title,fn):
@@ -77,7 +81,7 @@ class CharacterDialog(QDialog):
                 path=contained(library.root/'characters'/name,info['avatar'])
                 if path.is_file():icon=path
             item=QListWidgetItem(QIcon(str(icon)),name+'\n'+(info['category'] or '未分类'))
-            item.setData(Qt.ItemDataRole.UserRole,name);item.setToolTip('已有 T-pose' if info['tpose'] else '旧版空角色，请更新 T-pose')
+            item.setData(Qt.ItemDataRole.UserRole,name);item.setToolTip(name+'\n'+('已有 T-pose' if info['tpose'] else '旧版空角色，请更新 T-pose'))
             self.cards.addItem(item)
             if selected==name:self.cards.setCurrentItem(item)
 

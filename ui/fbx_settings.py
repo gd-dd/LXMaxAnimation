@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QWidget,QFormLayout,QCheckBox,QComboBox,QDoubleSpinBox,QSpinBox,
-    QLineEdit,QPlainTextEdit,QTabWidget,QScrollArea,QLabel)
+    QLineEdit,QPlainTextEdit,QTabWidget,QScrollArea,QLabel,QSizePolicy)
 from .widgets import ExpandingJson
 
 SCHEMA=json.loads(Path(__file__).with_name('unity-schema.json').read_text('utf-8-sig'))
@@ -88,6 +88,7 @@ class SettingsForm(QTabWidget):
         for title in (['Model · 模型','Rig · 骨骼','Animation · 动画','Materials · 材质'] if scope=='importer' else ['Clip · 独立配置']):
             body=QWidget();body.setObjectName('SettingsBody');body.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,True)
             form=QFormLayout(body);form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+            form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
             scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(body);self.addTab(scroll,title);self.forms[title]=form
         for field in fields(scope):
             key=field['name'];kind=field['type'];options=field['options']
@@ -100,8 +101,11 @@ class SettingsForm(QTabWidget):
             elif kind=='System.String' or kind in ('UnityEngine.Avatar','UnityEngine.AvatarMask','UnityEngine.AnimationClip'):control=QLineEdit()
             else:control=ExpandingJson()
             label=QLabel(LABELS.get(key,key)+'/'+key);label.setWordWrap(True)
-            label.setFixedWidth(155);label.setToolTip(key)
-            if not isinstance(control,QCheckBox):control.setMinimumWidth(260);control.setMinimumHeight(34)
+            label.setToolTip(label.text())
+            if not isinstance(control,QCheckBox):control.setMinimumWidth(120);control.setMinimumHeight(34)
+            control.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Preferred)
+            if isinstance(control,QComboBox):
+                control.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon);control.setMinimumContentsLength(8)
             if key in TUANJIE:label.setText(label.text()+'（团结扩展）')
             control.setToolTip(key+' · '+kind+('（结构化 JSON）' if isinstance(control,QPlainTextEdit) else ''))
             self.forms[group(key) if scope=='importer' else 'Clip · 独立配置'].addRow(label,control);self.controls[key]=control
@@ -131,3 +135,24 @@ class SettingsForm(QTabWidget):
             else:value=control.text()
             values[key]=value
         return validate(values,self.scope)
+
+    def raw_values(self):
+        values={}
+        for key,control in self.controls.items():
+            if isinstance(control,QCheckBox):value=control.isChecked()
+            elif isinstance(control,QComboBox):value=control.currentData()
+            elif isinstance(control,(QSpinBox,QDoubleSpinBox)):value=control.value()
+            elif isinstance(control,QPlainTextEdit):value=control.toPlainText()
+            else:value=control.text()
+            values[key]=value
+        return values
+
+    def restore_raw(self,values):
+        for key,value in values.items():
+            control=self.controls.get(key)
+            if control is None:continue
+            if isinstance(control,QCheckBox):control.setChecked(bool(value))
+            elif isinstance(control,QComboBox):control.setCurrentIndex(control.findData(value))
+            elif isinstance(control,(QSpinBox,QDoubleSpinBox)):control.setValue(value)
+            elif isinstance(control,QPlainTextEdit):control.setPlainText(value)
+            else:control.setText(value)

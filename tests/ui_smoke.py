@@ -5,14 +5,20 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from PySide6.QtWidgets import QApplication,QWidget,QVBoxLayout
 from PySide6.QtCore import Qt,QPoint,QPointF
-from PySide6.QtGui import QWheelEvent
+from PySide6.QtGui import QWheelEvent,QFontDatabase
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLineEdit,QScrollArea
 from ui.panel import create_panel
 from ui.library import Library,write_json
 from ui import clips
 root=Path(__file__).resolve().parents[1]
+output=Path(os.environ.get('LX_ANIMATION_QA_OUTPUT',str(root/'local-data')));output.mkdir(parents=True,exist_ok=True)
 app=QApplication([])
+font_path=Path(os.environ.get('WINDIR','C:/Windows'))/'Fonts/msyh.ttc'
+if font_path.is_file():
+    font_id=QFontDatabase.addApplicationFont(str(font_path))
+    assert font_id>=0,'Could not read existing Chinese font'
+    font=app.font();font.setFamily(QFontDatabase.applicationFontFamilies(font_id)[0]);app.setFont(font)
 with tempfile.TemporaryDirectory() as temp:
     base=Path(temp);library=Library(base/'library');library.initialize();library.add_category('主角')
     source=base/'source';source.mkdir();(source/'asset.fbx').write_bytes(b'UI test fixture');write_json(source/'tpose.json',{'schema':1})
@@ -51,7 +57,7 @@ with tempfile.TemporaryDirectory() as temp:
     assert clips.load(library,animation)==data
     assert panel.editor.table.currentItem().text(2)=='80'
     # Wheel over a focused value must scroll the active page, never alter the value.
-    panel.editor.tabs.setCurrentIndex(1);app.processEvents()
+    panel.editor.advanced_toggle.setChecked(True);panel.editor.tabs.setCurrentIndex(1);app.processEvents()
     spin=panel.editor.importer.controls['globalScale'];spin.setFocus();value=spin.value()
     scroll=panel.editor.importer.currentWidget();scroll.verticalScrollBar().setValue(0)
     wheel=QWheelEvent(QPointF(spin.rect().center()),QPointF(spin.mapToGlobal(spin.rect().center())),QPoint(),QPoint(0,-120),Qt.MouseButton.NoButton,Qt.KeyboardModifier.NoModifier,Qt.ScrollPhase.NoScrollPhase,False)
@@ -86,13 +92,13 @@ with tempfile.TemporaryDirectory() as temp:
     QTest.qWait(QApplication.doubleClickInterval()+150)
     assert loaded==[animation['id']]
     panel.assets.clearSelection();panel.assets.setCurrentItem(None);app.processEvents();assert not panel.editor.isEnabled()
-    panel.grab().save(str(root/'local-data/panel-empty.png'))
+    panel.grab().save(str(output/'panel-empty.png'))
     panel.assets.setCurrentItem(asset_item);app.processEvents();assert panel.editor.isEnabled()
     panel.editor.tabs.setCurrentIndex(0)
     panel.open_gallery();app.processEvents();assert panel.gallery.cards.count()==2
     panel.gallery.category.setCurrentIndex(panel.gallery.category.findData('主角'));assert panel.gallery.cards.count()==1
-    panel.gallery.grab().save(str(root/'local-data/characters.png'));panel.gallery.hide()
-    panel.grab().save(str(root/'local-data/panel-workflow.png'))
+    panel.gallery.grab().save(str(output/'characters.png'));panel.gallery.hide()
+    panel.grab().save(str(output/'panel-workflow.png'))
     from unittest.mock import patch,Mock
     fake_exe=base/'3dsmax.exe';fake_exe.touch();process=Mock(pid=87654);process.poll.return_value=None
     panel.disconnect()

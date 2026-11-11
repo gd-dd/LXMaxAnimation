@@ -1,9 +1,32 @@
 """Shared interaction rules: wheel scrolls, editing never starts on a double click."""
 import math
-from PySide6.QtCore import Qt,QObject,QEvent,QTimer,QPointF,Signal
+from PySide6.QtCore import Qt,QObject,QEvent,QTimer,QPointF,Signal,QSize
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import (QApplication,QWidget,QAbstractSpinBox,QComboBox,QScrollArea,
-    QPlainTextEdit,QTabBar,QTreeWidget,QAbstractItemView,QStyledItemDelegate,QDoubleSpinBox)
+    QPlainTextEdit,QTabBar,QTreeWidget,QAbstractItemView,QStyledItemDelegate,QDoubleSpinBox,QLabel,QSizePolicy,QMenu,QDialog,QVBoxLayout,QDialogButtonBox)
+
+class ElidedLabel(QLabel):
+    """One line in the workspace; tooltip and context menu retain the full text."""
+    def __init__(self,text='',parent=None):
+        super().__init__(parent);self.full_text=''
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred)
+        self.setText(text)
+    def setText(self,text):
+        self.full_text=str(text);self.setToolTip(self.full_text);self.render()
+    def text(self):return self.full_text
+    def render(self):
+        super().setText(self.fontMetrics().elidedText(self.full_text,Qt.TextElideMode.ElideMiddle,max(1,self.width())))
+    def resizeEvent(self,event):super().resizeEvent(event);self.render()
+    def minimumSizeHint(self):return QSize(0,self.fontMetrics().height()+4)
+    def contextMenuEvent(self,event):
+        menu=QMenu(self);show=menu.addAction('查看全文');copy=menu.addAction('复制全文')
+        action=menu.exec(event.globalPos())
+        if action==copy:QApplication.clipboard().setText(self.full_text)
+        elif action==show:
+            dialog=QDialog(self);dialog.setWindowTitle('完整内容');dialog.resize(580,280)
+            layout=QVBoxLayout(dialog);text=QPlainTextEdit(self.full_text);text.setReadOnly(True);layout.addWidget(text)
+            close=QDialogButtonBox(QDialogButtonBox.StandardButton.Close);close.rejected.connect(dialog.reject);layout.addWidget(close);dialog.exec()
 
 class WheelRouter(QObject):
     def __init__(self,root,fallback):
