@@ -310,7 +310,7 @@ class Panel(QWidget):
             asset[key]=value;self.restoring=True;item.setData(0,Qt.ItemDataRole.UserRole,asset);self.restoring=False
             self.update_selection_controls(asset)
             if self.editor.asset and self.editor.asset['id']==asset['id']:
-                self.editor.asset[key]=value;self.editor.title.setText('Clip 拆分')
+                self.editor.asset[key]=value;self.editor.update_heading()
             self.set_status('资产信息已保存。')
         except Exception as exc:
             self.restoring=True;item.setText(column,asset['name' if column==0 else 'notes']);self.restoring=False

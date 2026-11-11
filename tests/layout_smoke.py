@@ -121,11 +121,14 @@ def main():
             panel.editor.advanced_toggle.setChecked(advanced); app.processEvents()
             assert shell.size().toTuple() == (width, height), ('advanced forced larger', shell.size().toTuple())
             for widget in (panel.connect_button, panel.apply_button, panel.save_button,
-                           panel.editor.table, panel.editor.advanced_toggle, panel.editor.save_config):
+                           panel.editor.advanced_toggle, panel.editor.save_config):
                 visible_inside(widget)
             if advanced:
+                assert not panel.editor.table.isVisible()
                 for widget in (panel.editor.target, panel.editor.preset, panel.editor.tabs): visible_inside(widget)
                 assert panel.editor.current_scroll().viewport().height() >= 50
+            else:
+                visible_inside(panel.editor.table)
             report['geometry'].append({'requested': [width, height], 'actual': list(shell.size().toTuple()),
                                        'advanced': advanced, 'panel': list(panel.size().toTuple()),
                                        'editor': list(panel.editor.size().toTuple())})
@@ -141,7 +144,7 @@ def main():
             assert panel.selection_label.toolTip() == name
             item = find_asset(animation['id'])
             assert item.toolTip(0) == name and item.toolTip(3) == '长备注_' * 35
-            assert panel.editor.title.text() == 'Clip 拆分'
+            assert panel.editor.title.toolTip() == '当前 Clip：第二段动作'
         check('long-names-have-full-tooltips', long_names)
 
         def selection_roundtrip():
@@ -194,6 +197,47 @@ def main():
             panel.grab().save(str(OUTPUT / 'draft-restored.png'))
         check('close-reopen-restores-complete-invalid-draft', reopen_draft)
         panel.shutdown(); shell.close(); app.processEvents()
+
+        # Include the platform sidebar, header, inherited stylesheet and native
+        # loader. A bare QWidget has materially more space than the real host.
+        sys.path.insert(0, 'E:/project/LXTools/LXTools/src')
+        from desktop import Window, STYLE
+        from core import ToolStore
+        app.setStyle('Fusion');app.setStyleSheet(STYLE)
+        host_profile=base/'host-profile';host_data=host_profile/'tool-data/repo-1433389279'
+        write_json(host_data/'panel-settings.json',{'library':str(library.root),'character':role,
+                   'selectedAssets':{role:animation['id']}})
+        manifest=json.loads((ROOT/'.lxtool/manifest.json').read_text('utf-8'))
+        tool=dict(manifest,id='repo-1433389279',repository='gd-dd/LXMaxAnimation',root=str(ROOT),
+                  panelData=json.loads((ROOT/'.lxtool/panel.json').read_text('utf-8')))
+        window=Window(ToolStore(host_profile),base/'host-tools',autoload=False)
+        window.panel_title.setText('LXMaxAnimation · 0.0.4')
+        window.workspace.display(tool);window.pages.setCurrentWidget(window.tool_panel)
+        window.show();app.processEvents()
+        native=window.workspace.native_panel.widget
+        report['hostGeometry']=[]
+        def host_geometry(width,height):
+            window.resize(width,height);app.processEvents()
+            assert window.size().toTuple()==(width,height)
+            if native.narrow_tabs.isVisible():native.narrow_tabs.setCurrentIndex(1)
+            for advanced in (False,True):
+                native.editor.advanced_toggle.setChecked(advanced);app.processEvents()
+                for widget in (native.connect_button,native.apply_button,native.save_button,native.editor.advanced_toggle,native.editor.save_config):
+                    assert widget.isVisibleTo(window)
+                    assert window.rect().contains(QRect(widget.mapTo(window,QPoint()),widget.size()))
+                viewport=None
+                if advanced:
+                    assert not native.editor.table.isVisible()
+                    viewport=native.editor.current_scroll().viewport().height()
+                    assert viewport>=100,('host advanced viewport too small',width,height,viewport)
+                else:
+                    assert native.editor.table.isVisibleTo(window) and native.editor.table.viewport().height()>=70
+                report['hostGeometry'].append({'requested':[width,height],'panel':list(native.size().toTuple()),
+                                              'advanced':advanced,'settingsViewportHeight':viewport})
+                assert window.grab().save(str(OUTPUT/f'host-{width}-{height}-advanced-{advanced}.png'))
+        for width,height in ((1040,720),(1280,720),(1440,900)):
+            check(f'real-source-native-host-{width}-{height}',lambda w=width,h=height:host_geometry(w,h))
+        window.close();app.processEvents()
 
     report['ok'] = not report['errors']
     (OUTPUT / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')

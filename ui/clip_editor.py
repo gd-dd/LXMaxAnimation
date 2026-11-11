@@ -15,8 +15,8 @@ class ClipEditor(QWidget):
         self.library=self.asset=self.data=None;self.current_id=None;self.loading=False;self.clip_selection={};self.recovery={}
         layout=QVBoxLayout(self);layout.setContentsMargins(10,8,10,8);layout.setSpacing(7)
         row=QHBoxLayout();self.title=ElidedLabel('Clip 拆分');self.title.setStyleSheet('font-size:16px;font-weight:600');row.addWidget(self.title,1)
-        add=QPushButton('＋ Clip');add.clicked.connect(lambda:self.guard(self.add_clip));row.addWidget(add)
-        more=QToolButton();more.setText('更多');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
+        self.add_button=add=QPushButton('＋ Clip');add.clicked.connect(lambda:self.guard(self.add_clip));row.addWidget(add)
+        self.more_button=more=QToolButton();more.setText('更多');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
         for title,fn in [('复制当前 Clip',self.duplicate),('移除当前 Clip',self.remove)]:menu.addAction(title,lambda fn=fn:self.guard(fn))
         menu.addSeparator()
         for column,title in [(4,'显示备注列'),(5,'显示源 Take 列')]:
@@ -51,7 +51,15 @@ class ClipEditor(QWidget):
 
     def toggle_advanced(self,opened):
         self.advanced.setVisible(opened)
-        self.advanced_toggle.setArrowType(Qt.ArrowType.DownArrow if opened else Qt.ArrowType.RightArrow)
+        self.table.setVisible(not opened);self.source.setVisible(not opened)
+        self.add_button.setVisible(not opened);self.more_button.setVisible(not opened)
+        self.advanced_toggle.setText('返回 Clip 列表' if opened else 'FBX / Clip 高级配置')
+        self.advanced_toggle.setArrowType(Qt.ArrowType.LeftArrow if opened else Qt.ArrowType.RightArrow)
+        self.update_heading()
+
+    def update_heading(self):
+        current=self.current()
+        self.title.setText(('当前 Clip：'+current['name'] if current else 'FBX / Clip 配置') if self.advanced_toggle.isChecked() else 'Clip 拆分')
 
     def view_state(self):
         if self.asset:self.clip_selection[self.asset['id']]=self.current_id
@@ -183,6 +191,7 @@ class ClipEditor(QWidget):
             self.target.setCurrentText(self.data.get('targetEditor','2022.3'))
             self.importer.set_values(self.data.get('fbxSettings',clips.fbx_defaults()))
         finally:self.loading=False
+        self.update_heading()
 
     def current_scroll(self):
         form=self.clip_settings if self.tabs.currentIndex()==0 else self.importer
