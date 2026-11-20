@@ -226,8 +226,12 @@ def param(export,name,value=None):
 
 def export_asset(args):
     kind=args['kind']
+    scoped=args.get('selectedRoleOnly',False)
+    if scoped and (kind not in ('animation','pose') or args.get('expected') is None):
+        raise ValueError('仅已登记角色的 Pose 或动画可按角色选区保存。')
     if args.get('expected') is not None:
-        nodes=list(rt.objects);validate_scene(nodes,args['expected'])
+        nodes=selected_role() if scoped else list(rt.objects)
+        validate_scene(nodes,args['expected'])
     elif kind=='model' and args.get('strictSelection'):
         nodes=selected_role()
     else:nodes=selected_hierarchy(args.get('nodes'), include_skin=kind=='model')
@@ -264,7 +268,7 @@ def export_asset(args):
     try:
         rt.select(nodes)
         # Native scene data preserves the complete rig and controllers.
-        if kind=='animation':
+        if kind=='animation' and not scoped:
             if not rt.saveMaxFile(str(folder/'source.max'),useNewFile=False,clearNeedSaveFlag=False,quiet=True):raise RuntimeError('完整 Max 场景保存失败。')
         else:
             if not rt.saveNodes(nodes,str(folder/'source.max'),quiet=True):raise RuntimeError('角色场景保存失败。')

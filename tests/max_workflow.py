@@ -1,10 +1,11 @@
 """Run with 3dsmaxbatch, never in a user's editing scene."""
 from pathlib import Path
-import runpy,json,traceback,uuid,hashlib
+import os,runpy,json,traceback,uuid,hashlib
 from pymxs import runtime as rt
 import pymxs
 root=Path(__file__).resolve().parents[1]
-output=root/'local-data'/('workflow-'+uuid.uuid4().hex[:8]);output.mkdir(parents=True)
+evidence=Path(os.environ.get('LX_WORKFLOW_TEST_OUTPUT',root/'local-data'))
+output=evidence/('workflow-'+uuid.uuid4().hex[:8]);output.mkdir(parents=True)
 report={'ok':False,'output':str(output)}
 try:
     bridge=runpy.run_path(str(root/'max/bridge.py'))
@@ -55,7 +56,17 @@ try:
     except ValueError as exc:assert 'UnexpectedObject' in str(exc)
     else:raise AssertionError('Extra object accepted')
     assert not list(failed.iterdir())
-    rt.delete(extra);rt.delete(control)
+    scoped=output/'selected-target';scoped.mkdir()
+    rt.select([parent,mesh,control])
+    isolated=bridge['export_asset']({'kind':'animation','rig':'Generic','sceneRange':True,'expected':signature,
+                                    'selectedRoleOnly':True,'directory':str(scoped)})
+    assert isolated['metadata']['signature']==signature
+    assert rt.getNodeByName('UnexpectedObject') is not None
+    assert rt.loadMaxFile(str(scoped/'source.max'),quiet=True)
+    assert bridge['scene_signature'](list(rt.objects))==signature
+    assert (int(rt.frameRate),float(rt.animationRange.start),float(rt.animationRange.end))==(24,2,12)
+    report['retargetResave']='Selected target saved with its range, FPS and rig; unrelated objects excluded'
+    control=rt.getNodeByName('RoleControl');rt.delete(control)
     try:bridge['export_asset']({'kind':'pose','rig':'Generic','expected':signature,'directory':str(failed)})
     except ValueError as exc:assert 'RoleControl' in str(exc)
     else:raise AssertionError('Missing control accepted')
@@ -78,5 +89,5 @@ try:
     report.update(ok=True,animation=result,integrity='extra/missing rejected without output',isolation='Max save changes working scene only')
 except Exception:report['error']=traceback.format_exc()
 finally:
-    (root/'local-data/workflow-result.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),'utf-8')
+    (evidence/'workflow-result.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),'utf-8')
     print(json.dumps(report,ensure_ascii=False))

@@ -87,7 +87,12 @@ class Panel(QWidget):
         menu.addAction('资产库 / 同步',lambda:self.guard(self.library_settings));menu.addSeparator()
         for title,fn in [('安装自动连接组件',self.install_connection),('连接帮助',self.connection_help),('切换 Max 窗口',self.connect_max),('断开连接',self.disconnect),('更换 Max 程序',self.choose_max_program)]:menu.addAction(title,lambda fn=fn:self.guard(fn))
         more.setMenu(menu);row.addWidget(more);outer.addLayout(row)
-        self.connection=ElidedLabel('尚未连接 Max');outer.addWidget(self.connection)
+        connection_row=QHBoxLayout()
+        self.connection=ElidedLabel('尚未连接 Max')
+        connection_row.addWidget(self.connection,1)
+        self.register_character=self.button('从 Max 登记角色',lambda:self.capture('model'))
+        connection_row.addWidget(self.register_character)
+        outer.addLayout(connection_row)
         self.narrow_tabs=QTabBar();self.narrow_tabs.addTab('资产浏览');self.narrow_tabs.addTab('资产 / Clip 编辑');self.narrow_tabs.setExpanding(True)
         self.narrow_tabs.currentChanged.connect(self.update_workspace);outer.addWidget(self.narrow_tabs);self.narrow_tabs.hide()
         self.split=QSplitter();self.split.setHandleWidth(8);outer.addWidget(self.split,1)
@@ -95,8 +100,13 @@ class Panel(QWidget):
         self.search=QLineEdit();self.search.setPlaceholderText('搜索动画 / Pose / 备注');self.search.textChanged.connect(lambda:self.guard(self.refresh_assets));leftbox.addWidget(self.search)
         row=QHBoxLayout();self.kind=QComboBox();self.kind.addItem('全部资产','');[self.kind.addItem(v,k) for k,v in KINDS.items()]
         self.kind.currentIndexChanged.connect(lambda:self.guard(self.refresh_assets));row.addWidget(self.kind,1)
-        create=QToolButton();create.setText('＋ 从 Max 导入');create.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(create)
-        menu.addAction('动画',lambda:self.guard(lambda:self.capture('animation')));menu.addAction('单帧 Pose',lambda:self.guard(lambda:self.capture('pose')));menu.addSeparator();menu.addAction('刷新列表',lambda:self.guard(self.refresh_assets));create.setMenu(menu);row.addWidget(create);leftbox.addLayout(row)
+        leftbox.addLayout(row)
+        capture_row=QHBoxLayout()
+        self.capture_pose=self.button('保存 Pose',lambda:self.capture('pose'))
+        self.capture_animation=self.button('保存动画',lambda:self.capture('animation'))
+        capture_row.addWidget(self.capture_pose)
+        capture_row.addWidget(self.capture_animation)
+        leftbox.addLayout(capture_row)
         self.assets=AssetTree();self.assets.setAlternatingRowColors(True);self.assets.setHeaderLabels(['名称','类型','版本','备注']);self.assets.setRootIsDecorated(False);self.assets.setSortingEnabled(True);self.assets.sortItems(0,Qt.SortOrder.AscendingOrder)
         self.assets.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch);self.assets.header().setSectionResizeMode(3,QHeaderView.ResizeMode.Stretch)
         self.assets.setColumnWidth(1,72);self.assets.setColumnWidth(2,58)
@@ -247,7 +257,7 @@ class Panel(QWidget):
         if not live or live['birth']!=selected['birth']:raise ValueError('该 Max 已退出，请重新选择。')
         if not selected['session']:
             self.connection_help();return
-        self.active_session=selected['session']['directory'];self.auto_reconnect=False;self.persist();self.poll()
+        self.remember_max_target(selected['session']);self.active_session=selected['session']['directory'];self.auto_reconnect=False;self.persist();self.poll()
     def disconnect(self):self.idle();self.active_session=None;self.auto_reconnect=False;self.persist();self.poll()
     def connection_help(self):
         script=self.context.resource('max/bootstrap.ms')
@@ -269,6 +279,8 @@ class Panel(QWidget):
             expected=info['tpose']['metadata'].get('signature')
             if not expected:raise ValueError('角色缺少完整场景清单，请先在角色库更新 T-pose。')
             args['expected']=expected
+            if dialog.selected_role_only.isChecked():
+                args['selectedRoleOnly']=True
         else:args['strictSelection']=True
         result=host.request(session,'export',**args)
         self.pending={'result':str(result),'time':time.time(),'stage':stage,'kind':kind,'name':name,'character':character,'category':dialog.category.currentData() or '',
@@ -280,6 +292,11 @@ class Panel(QWidget):
         else:self.capture(asset['kind'],replace=asset)
     def send_to_max(self,asset):
         self.idle();self.editor.flush();session=self.selected_session();library=self.library
+        if asset['kind'] in ('animation','model'):
+            scene=Path(session.get('scene') or '未命名场景').name
+            prompt=f'将在 Max（PID {session["pid"]}）打开资产工作副本，替换当前场景「{scene}」。未保存的修改可能丢失，确定继续？'
+            if QMessageBox.question(self,'替换当前 Max 场景',prompt)!=QMessageBox.StandardButton.Yes:
+                return
         def ready(path):
             result=host.request(session,'import',path=str(path),kind=asset['kind'],rig=asset.get('metadata',{}).get('rig','Generic'))
             self.pending={'result':str(result),'time':time.time(),'type':'import','session':session['directory']}
@@ -329,7 +346,7 @@ class Panel(QWidget):
         self.idle();available=host.sessions()
         selected=host.preferred_session(available,self.active_session or self.settings.get('session'))
         if selected:
-            self.active_session=selected['directory'];self.auto_reconnect=False;self.persist();self.poll()
+            self.remember_max_target(selected);self.active_session=selected['directory'];self.auto_reconnect=False;self.persist();self.poll()
             self.set_status('已连接 Max，无需重复启动。');return
         if host.available_windows():self.connect_max();return
         path=host.preferred_max(self.settings.get('maxExecutable',''))
@@ -359,23 +376,44 @@ class Panel(QWidget):
             self.run_job(fn,'正在同步资产库…',lambda message:(self.refresh_assets(),self.set_status(message)))
         for title,operation in [('初始化 Git LFS','init'),('拉取','pull'),('保存并推送','push')]:row.addWidget(self.button(title,lambda operation=operation:sync(operation)))
         form.addRow(row);dialog.exec()
+    def remember_max_target(self, session):
+        state=getattr(self.context,'workspace_state',None)
+        if state is not None and session.get('birth') and session.get('pid'):
+            state['max_target']=(int(session['pid']),str(session['birth']))
+
+    def max_connection_status(self):
+        return self.connection_state
+
     def poll(self):
         if self.closed:return
         available=host.sessions()
         if self.auto_reconnect and not self.launching:
-            selected=host.preferred_session(available,self.active_session)
+            state=getattr(self.context,'workspace_state',{})
+            shared=state.get('max_target')
+            if shared and not self.active_session:
+                selected=next((item for item in available if item.get('protocol',1)>=2
+                               and (item['pid'],str(item.get('birth','')))==shared),None)
+            else:
+                selected=host.preferred_session(available,self.active_session)
             if selected:
-                self.active_session=selected['directory'];self.auto_reconnect=False;self.persist()
+                self.remember_max_target(selected);self.active_session=selected['directory'];self.auto_reconnect=False;self.persist()
         if self.launching:
             started=next((s for s in available if s['pid']==self.launching['pid'] and s.get('protocol',1)>=2),None)
             if started:
-                self.active_session=started['directory'];self.launching=None;self.persist();self.set_status('Max 已启动并连接。')
+                self.remember_max_target(started);self.active_session=started['directory'];self.launching=None;self.persist();self.set_status('Max 已启动并连接。')
             elif self.launching['process'].poll() is not None or time.time()-self.launching['time']>240:
                 self.launching=None;self.set_status('Max 未返回连接，请检查启动界面，再从“连接”菜单选择窗口。')
         matches=[s for s in available if s['directory']==self.active_session]
-        if matches:
+        if matches and matches[0].get('protocol',1)>=2:
+            self.connection_state='Max 已连接'
             session=matches[0];self.connection.setText(f"● Max · PID {session['pid']} · {Path(session.get('scene') or '未命名场景').name}  |  {session.get('start','?')} — {session.get('end','?')} 帧 · {session.get('fps','?')} FPS · 当前 {session.get('frame','?')}")
-        else:self.connection.setText('◌ 正在启动 Max…' if self.launching else ('○ Max 未连接' if not self.active_session else '○ Max 连接已断开'))
+        else:
+            self.connection_state='Max 连接中' if self.launching else ('Max 已断开' if self.active_session else 'Max 未连接')
+            self.connection.setText('○ '+self.connection_state)
+        connected=self.connection_state=='Max 已连接'
+        self.register_character.setEnabled(connected)
+        self.capture_pose.setEnabled(connected and bool(self.active_character))
+        self.capture_animation.setEnabled(connected and bool(self.active_character))
         pending=self.pending
         if not pending:return
         path=Path(pending['result'])

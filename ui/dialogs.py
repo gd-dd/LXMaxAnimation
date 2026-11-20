@@ -15,6 +15,7 @@ class CaptureDialog(QDialog):
         self.name.setReadOnly(bool(update));form.addRow('角色名' if kind=='model' else '名称',self.name)
         self.category=QComboBox();self.category.addItem('未分类','')
         for category in panel.library.categories():self.category.addItem(category,category)
+        self.selected_role_only=QCheckBox('只保存视口中选中的角色（适用于重定向场景）')
         self.rig=QComboBox();self.rig.addItems(['Generic','Biped','CAT'])
         self.textures=QCheckBox('同时复制贴图（可选）');self.avatar=QCheckBox('从当前视口生成头像');self.avatar.setChecked(True)
         if kind=='model':
@@ -25,6 +26,8 @@ class CaptureDialog(QDialog):
         else:
             label=QLabel('动画读取当前 Max 场景的起止帧与 FPS，保存完整场景。' if kind=='animation' else '读取当前帧的角色姿态与可记录的控制器数值。')
         label.setWordWrap(True);form.addRow(label)
+        if kind!='model':
+            form.addRow(self.selected_role_only)
         self.notes=QLineEdit();form.addRow('备注',self.notes)
         buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept);buttons.rejected.connect(self.reject);form.addRow(buttons)

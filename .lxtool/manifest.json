@@ -3,7 +3,7 @@
   "kind": "lx-tool",
   "name": "LXMaxAnimation",
   "description": "连接 Max，以 T-pose 管理角色、完整动画场景和 Pose，编辑独立 Clip 配置。",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "category": "动画管线",
   "icon": ".lxtool/icon.png",
   "readme": ".lxtool/README.md",
@@ -18,18 +18,18 @@
     "ui/max_connection.py": "127487795232286b023aaaae265af9277f2cf024af92cb2c2ca15c24c485e4dd",
     "ui/library.py": "6254ae3f3bc69600aff895294ffdae42c520ba7f1d948c456466d27fed7c2d0c",
     "ui/integrations.py": "99fe30489409ec23f00e378d28b937a1e0c0a0a41e3d48e79173e652b70573d5",
-    "ui/panel.py": "d9d5eb9a9edf3ccd1b214886dc34ffb3c5449ed5730474f6e7d0ffcfbbf6edd8",
+    "ui/panel.py": "304385f25fe4fcf8cc9cac6d4e56af8acc606c530a9b589623bb7e0369b5ad7c",
     "ui/clips.py": "834a201ffb12269e18600b2a81b9eb445317aaa4575a4895ab309e0e183cfebf",
     "ui/clip_editor.py": "93c3e226c1bb298c30f7afa2ca8f29ec2216f263d399671bfa7e34a2669435bc",
-    "ui/dialogs.py": "27e56e5af2e5272b88fee6470a0a5f4f760be6a5a42b37c0d16bc02197bc1806",
+    "ui/dialogs.py": "0ca7502264dcd22bc3d972e8b65d471f159d981d2d16b85bf705880ecf06453f",
     "ui/widgets.py": "020da43fdfe7c51ef7cb0c027e3e61afa07d5d30d717330309fa09690d386df5",
     "ui/fbx_settings.py": "c1ff75b714af2d811a776a0b258f5b5f8ebda60b47ac2e04b7b7abd4d8a515d7",
     "ui/unity-schema.json": "abe76da07ee01974a15813d9a64984714a6f5b5792f56dddf6e2520bda9c38b7",
     "ui/icons/chevron-down.svg": "5a754cf77e5b0e936a71a9300ffcab6d97e405ecb6bc06fa169c26b234511e0b",
     "ui/icons/chevron-up.svg": "c6f9c0ce9ab58e0acbf8ca9dcced8ded341ce07d92d07c545f7915b0e8de2a7e",
     "max/bootstrap.ms": "4d571cdb39f236f9fe460213246d7b962948c9efe9eebe7792ca4a43aa3f6a53",
-    "max/bridge.py": "de3e3a355dd6c0f19da093d17f2aa103bdbac47ad06fe6a4861feff8d336fad0"
+    "max/bridge.py": "e79dfcce0c08ecae4dab7cefaa9d761b56a42018668bb9abb9160027bcd45765"
   },
-  "releaseNotes": "支持发现并选择所有运行中的 Max 窗口；新增用户级自动连接组件及既有窗口连接脚本入口，保留明确目标并防止自动切换。",
+  "releaseNotes": "# LXMaxAnimation 0.0.5\n\n- 角色登记、保存 Pose 和保存动画直接可见。支持与新版工具架的 Max 工具集共享明确的宿主目标。\n- 多角色场景可显式只保存所选目标角色，校验角色登记结构后保存目标的 Pose 或动画。保留原有完整场景保存方式。\n- 打开角色或动画场景前显示所连接的 Max PID 与当前场景并确认，资产仍通过工作副本打开。\n\n独立 Max 2026 验证了源对象与目标同场时的选区保存、帧段、FPS 和场景隔离。Unity 实际接入维持暂停。",
   "publishedAt": "2026-11-01"
 }

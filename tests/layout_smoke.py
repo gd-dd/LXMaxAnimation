@@ -211,10 +211,10 @@ def main():
         tool=dict(manifest,id='repo-1433389279',repository='gd-dd/LXMaxAnimation',root=str(ROOT),
                   panelData=json.loads((ROOT/'.lxtool/panel.json').read_text('utf-8')))
         window=Window(ToolStore(host_profile),base/'host-tools',autoload=False)
-        window.panel_title.setText('LXMaxAnimation · 0.0.4')
-        window.workspace.display(tool);window.pages.setCurrentWidget(window.tool_panel)
+        with patch.object(window,'installed',return_value=[tool]):
+            window.open_workflow_tool(tool['id'])
         window.show();app.processEvents()
-        native=window.workspace.native_panel.widget
+        native=window.running_tools[tool['id']].native_panel.widget
         report['hostGeometry']=[]
         def host_geometry(width,height):
             window.resize(width,height);app.processEvents()
