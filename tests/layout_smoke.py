@@ -139,6 +139,24 @@ def main():
                 check(f'geometry-{width}-{height}-advanced-{advanced}',
                       lambda w=width, h=height, a=advanced: geometry_case(w, h, a))
 
+        def column_drag():
+            from PySide6.QtTest import QTest
+            shell.resize(1280,800)
+            panel.editor.advanced_toggle.setChecked(False)
+            app.processEvents()
+            for tree in (panel.assets,panel.editor.table):
+                header=tree.header()
+                assert header.isEnabled() and header.isVisible()
+                old=(header.sectionSize(0),header.sectionSize(1))
+                start=QPoint(header.sectionViewportPosition(1)-1,header.height()//2)
+                end=start+QPoint(12,0)
+                QTest.mousePress(header.viewport(),Qt.MouseButton.LeftButton,pos=start)
+                QTest.mouseMove(header.viewport(),end)
+                QTest.mouseRelease(header.viewport(),Qt.MouseButton.LeftButton,pos=end)
+                assert (header.sectionSize(0),header.sectionSize(1))==(old[0]+12,old[1])
+                header.resizeSection(0,old[0])
+
+
         def long_names():
             assert panel.character_title.toolTip() == role
             assert panel.selection_label.toolTip() == name
@@ -146,6 +164,7 @@ def main():
             assert item.toolTip(0) == name and item.toolTip(3) == '长备注_' * 35
             assert panel.editor.title.toolTip() == '当前 Clip：第二段动作'
         check('long-names-have-full-tooltips', long_names)
+        check('column-border-drags-the-labelled-column',column_drag)
 
         def selection_roundtrip():
             assert panel.editor.current_id == clip_id

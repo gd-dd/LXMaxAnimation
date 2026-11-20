@@ -67,7 +67,7 @@ class Panel(QWidget):
             QHeaderView::section:disabled {color:#9ca595;}
             QTabBar::tab:disabled {color:#9ca595;}
             QTabBar::tab:selected:disabled {background:#fff;color:#9ca595;}
-            QHeaderView::section {background:#edf2e7;border:0;border-bottom:1px solid #d6e0cc;padding:7px;color:#516346;}
+            QHeaderView::section {background:#edf2e7;border:0;border-bottom:1px solid #d6e0cc;border-right:2px solid #81986b;padding:7px;color:#516346;}
             QTabWidget::pane {border:1px solid #dce4d4;border-radius:5px;background:#fff;}
             QTabBar::tab {padding:8px 13px;background:#edf2e8;color:#617154;border:0;}
             QTabBar::tab:selected {background:#fff;color:#385623;border-bottom:3px solid #92b85b;}
@@ -108,7 +108,11 @@ class Panel(QWidget):
         capture_row.addWidget(self.capture_animation)
         leftbox.addLayout(capture_row)
         self.assets=AssetTree();self.assets.setAlternatingRowColors(True);self.assets.setHeaderLabels(['名称','类型','版本','备注']);self.assets.setRootIsDecorated(False);self.assets.setSortingEnabled(True);self.assets.sortItems(0,Qt.SortOrder.AscendingOrder)
-        self.assets.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch);self.assets.header().setSectionResizeMode(3,QHeaderView.ResizeMode.Stretch)
+        self.assets.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.assets.header().setCascadingSectionResizes(False)
+        self.assets.header().setStretchLastSection(True)
+        self.assets.header().setToolTip("拖动表头分隔线，调整分隔线左侧的列")
+        self.assets.setColumnWidth(0,125)
         self.assets.setColumnWidth(1,72);self.assets.setColumnWidth(2,58)
         self.assets.currentItemChanged.connect(self.asset_changed);self.assets.itemDoubleClicked.connect(lambda *_:self.guard(lambda:self.send_to_max(self.selected_asset())))
         self.assets.itemChanged.connect(self.asset_metadata_changed);leftbox.addWidget(self.assets,1)
