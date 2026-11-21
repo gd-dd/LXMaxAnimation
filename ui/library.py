@@ -82,6 +82,63 @@ class Library:
         folder.mkdir(parents=True, exist_ok=False)
         write_json(folder / 'character.json', {'schema': 1, 'name': name})
 
+    def create_asset(self, character, name, kind, new_character=False):
+        character,name=safe_name(character),safe_name(name)
+        if kind not in KINDS:
+            raise ValueError('请选择资产类型。')
+        if new_character:
+            if any(value.casefold()==character.casefold() for value in self.characters()):
+                raise ValueError('角色已存在。')
+        else:
+            if character not in self.characters():
+                raise ValueError('请先选择角色。')
+            assets,errors=self.list_assets(character,kind=kind)
+            if errors or any(a['name'].casefold()==name.casefold() for a in assets):
+                raise ValueError('已存在同名同类资产，或角色索引需要修复。')
+        revision=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')+'-'+uuid.uuid4().hex[:8]
+        role=contained(self.root,'characters/'+character)
+        relative=Path(kind)/(name+'--'+revision)
+        folder=role/relative
+        data=dict(schema=1,id=uuid.uuid4().hex,character=character,name=name,kind=kind,revision=revision,
+                  created=datetime.now(timezone.utc).isoformat(),main='',notes='',files={},metadata={},placeholder=True)
+        if new_character:
+            stage=self.stage()
+            try:
+                write_json(stage/'character.json',{'schema':1,'name':character})
+                write_json(stage/relative/'asset.json',data)
+                role.parent.mkdir(parents=True,exist_ok=True)
+                stage.rename(role)
+            finally:
+                if stage.exists():shutil.rmtree(stage)
+        else:
+            write_json(contained(role,relative)/'asset.json',data)
+        return dict(data,_directory=str(folder))
+
+    def save_asset_revision(self, previous, kind, source, main, metadata):
+        if previous.get('placeholder') and kind!=previous['kind']:
+            candidates,errors=self.list_assets(previous['character'],kind=kind)
+            if errors or any(a['name'].casefold()==previous['name'].casefold() for a in candidates):
+                raise ValueError('目标类型中已有同名资产，请选择该资产保存。')
+        asset=self.publish(previous['character'],previous['name'],kind,source,main,previous.get('notes',''),metadata)
+        folder=Path(asset['_directory'])
+        try:
+            if previous.get('placeholder'):
+                source_folder=contained(self.root,Path(previous['_directory']).relative_to(self.root))
+                if read_json(source_folder/'asset.json')['id']!=previous['id']:
+                    raise ValueError('空资产已发生变化，请刷新后再保存。')
+                archive=self.root/'.staging'/'materialized-assets'
+                if archive.resolve()!=archive:
+                    raise ValueError('空资产归档目录路径无效。')
+                archive.mkdir(parents=True,exist_ok=True)
+                source_folder.rename(archive/(previous['id']+'-'+source_folder.name))
+            elif previous['kind']==kind:
+                warning=self.mark_superseded(previous,asset)
+                if warning:asset['saveWarning']=warning
+        except Exception:
+            shutil.rmtree(folder)
+            raise
+        return asset
+
     def delete_character(self, name):
         name = safe_name(name)
         source = self.root / 'characters' / name
@@ -160,7 +217,7 @@ class Library:
             raise ValueError('主文件不存在或为空。')
         if kind in ('model', 'animation') and main_path.suffix.lower() not in ('.fbx','.max'):
             raise ValueError('模型和动画主文件必须是 FBX 或 Max 场景。')
-        if kind == 'pose' and read_json(main_path).get('schema') != 1:
+        if kind == 'pose' and main_path.name != 'source.max' and read_json(main_path).get('schema') != 1:
             raise ValueError('Pose 文件格式不正确。')
         revision = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:8]
         destination = contained(self.root, f'characters/{character}/{kind}/{name}--{revision}')
@@ -189,6 +246,8 @@ class Library:
                 shutil.rmtree(staging)
 
     def verify(self, asset):
+        if asset.get('placeholder'):
+            raise ValueError('空资产还没有场景，请先保存修改。')
         folder = contained(self.root, Path(asset['_directory']).relative_to(self.root))
         if asset['main'] not in asset['files']:
             raise ValueError('主文件未列入清单。')
@@ -214,13 +273,19 @@ class Library:
         info.setdefault('category', '')
         info.setdefault('avatar', '')
         assets, _ = self.list_assets(name, kind='model')
-        current = next((a for a in assets if a['id'] == info.get('tposeAssetId')), assets[0] if assets else None)
+        assets=[a for a in assets if not a.get('placeholder')]
+        current = next((a for a in assets if a.get('metadata',{}).get('workspaceAsset')
+                        or a['id']==info.get('tposeAssetId')),assets[0] if assets else None)
         info['tpose'] = current
         info['reference'] = current
-        if not current and info.get('sceneAssetId'):
+        if not current:
             animations, _ = self.list_assets(name,kind='animation')
-            info['reference'] = next((a for a in animations if a['id']==info['sceneAssetId']),
+            animations=[a for a in animations if not a.get('placeholder')]
+            info['reference'] = next((a for a in animations if a['id']==info.get('sceneAssetId')),
                                      next((a for a in animations if a.get('metadata',{}).get('fullCharacterScene')),None))
+        if not info['reference']:
+            poses,_=self.list_assets(name,kind='pose')
+            info['reference']=next((a for a in poses if a.get('metadata',{}).get('fullCharacterScene')),None)
         return info
 
     def categories(self):

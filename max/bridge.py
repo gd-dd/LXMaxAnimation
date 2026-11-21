@@ -283,8 +283,8 @@ def export_character_scene(args):
     folder = Path(args['directory']).resolve()
     if not folder.is_dir() or any(folder.iterdir()):
         raise ValueError('导出临时目录必须存在且为空。')
-    if args['kind'] not in ('model','animation'):
-        raise ValueError('完整角色场景只支持 T-pose 或动画。')
+    if args['kind'] not in ('model','animation','pose'):
+        raise ValueError('请选择有效的资产类型。')
     scene = folder / 'source.max'
     if not rt.saveMaxFile(str(scene),useNewFile=False,clearNeedSaveFlag=False,quiet=True):
         raise RuntimeError('完整 Max 场景保存失败。')
@@ -325,13 +325,18 @@ def export_character_scene(args):
         signature=None
         warnings.append('场景有重名对象，原生场景已完整保存。按对象匹配的 Pose 或动画操作需要唯一名称。')
     rig=args.get('rig','Generic')
-    if signature and args['kind']=='model':
-        export_pose(nodes,folder/'tpose.json',rig)
+    if signature and args['kind'] in ('model','pose'):
+        sidecar='tpose.json' if args['kind']=='model' else 'pose.json'
+        try:
+            export_pose(nodes,folder/sidecar,rig)
+        except ValueError as exc:
+            warnings.append('已保存完整场景，当前姿势无法用于覆盖帧：'+str(exc))
     if args['kind']=='animation':
         warning=export_animation_keys(nodes,folder,rig,rt.animationRange.start,rt.animationRange.end)
         if warning:warnings.append(warning)
-    metadata=dict(rig=args.get('rig','Generic'),fps=int(rt.frameRate),start=float(rt.animationRange.start),
-                  end=float(rt.animationRange.end),frame=float(rt.sliderTime),nodes=[str(n.name) for n in nodes],
+    frame=float(rt.sliderTime)
+    start,end=(float(rt.animationRange.start),float(rt.animationRange.end)) if args['kind']=='animation' else (frame,frame)
+    metadata=dict(rig=rig,fps=int(rt.frameRate),start=start,end=end,frame=frame,nodes=[str(n.name) for n in nodes],
                   signature=signature,scene=str(rt.maxFilePath)+str(rt.maxFileName),includeTextures=True,
                   fullCharacterScene=True,warnings=warnings)
     return dict(ok=True,main='source.max',warnings=warnings,metadata=metadata)
@@ -457,9 +462,12 @@ def import_asset(args):
         tpose=path.parent/'tpose.json'
         if not tpose.is_file():raise ValueError('此版本没有可打键的 T-pose，请打开场景后重新保存 T-pose。')
         return apply_pose(tpose,rig)
-    if args['kind']=='pose':return apply_pose(path,rig,args.get('key',True))
+    if args['kind']=='pose' and operation!='coverScene':
+        pose=path.parent/'pose.json' if path.suffix.lower()=='.max' else path
+        if not pose.is_file():raise ValueError('此版本没有可用于覆盖帧的 Pose。')
+        return apply_pose(pose,rig,args.get('key',True))
     source=path if path.suffix.lower()=='.max' else path.parent/'source.max'
-    if args['kind'] in ('animation','model') and source.is_file():
+    if (args['kind'] in ('animation','model') or operation=='coverScene') and source.is_file():
         # Open a working copy so Ctrl+S cannot overwrite an immutable library revision.
         working_root=Path(os.environ['LOCALAPPDATA'])/'LXMaxAnimation/working-scenes';working_root.mkdir(parents=True,exist_ok=True)
         working=working_root/(uuid.uuid4().hex+'.max');shutil.copy2(source,working)
@@ -487,10 +495,28 @@ def import_asset(args):
             if str(bitmap.filename) in mapping:
                 bitmap.filename=mapping[str(bitmap.filename)]
                 changed=True
+        if operation=='coverScene' and args.get('captureFrame') is not None:
+            rt.sliderTime=float(args['captureFrame'])
         if changed:
             rt.saveMaxFile(str(working),quiet=True)
         return {'ok':True,'working':str(working),'message':'已打开角色工作场景；编辑与保存只影响工作副本。' if args['kind']=='model' else '已替换当前 Max 场景；编辑与保存只影响工作副本。'}
     raise ValueError('此资产没有原生 Max 场景，请从 Max 重新导入。')
+
+
+def execute_request(action,args):
+    if 'expectedScene' in args:
+        current=str(rt.maxFilePath)+str(rt.maxFileName)
+        expected=args['expectedScene']
+        if os.path.normcase(os.path.normpath(current))!=os.path.normcase(os.path.normpath(expected)):
+            raise ValueError('Max 当前场景已切换，操作未执行。请重新选择。')
+    if action=='export':return export_asset(args)
+    if action=='saveWorkspaceAsset':
+        result=export_character_scene(args)
+        result['metadata']['workspaceAsset']=True
+        return result
+    if action=='coverScene':return import_asset(dict(args,operation='coverScene'))
+    if action in ('import','keyAsset'):return import_asset(args)
+    raise ValueError('Unknown action')
 
 
 class Bridge:
@@ -514,16 +540,13 @@ class Bridge:
         if self.busy:return
         self.busy=True
         try:
-            write_json(self.root/'info.json',{'protocol':2,'fullCharacterScene':1,'keyAssetOperations':1,'pid':os.getpid(),'birth':self.birth,'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0]),'frame':float(rt.sliderTime),'start':float(rt.animationRange.start),'end':float(rt.animationRange.end),'fps':int(rt.frameRate),'selection':[str(n.name) for n in rt.selection]})
+            write_json(self.root/'info.json',{'protocol':2,'fullCharacterScene':1,'keyAssetOperations':1,'assetWorkspace':1,'pid':os.getpid(),'birth':self.birth,'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0]),'frame':float(rt.sliderTime),'start':float(rt.animationRange.start),'end':float(rt.animationRange.end),'fps':int(rt.frameRate),'selection':[str(n.name) for n in rt.selection]})
             for path in self.root.glob('*.request.json'):
                 working=path.with_suffix('.working');path.rename(working)
                 try:
                     data=json.loads(working.read_text('utf-8'))
                     if data['expires']<time.time():raise ValueError('请求已过期，未执行。')
-                    action=data['action']
-                    if action=='export':result=export_asset(data['args'])
-                    elif action in ('import','keyAsset'):result=import_asset(data['args'])
-                    else:raise ValueError('Unknown action')
+                    result=execute_request(data['action'],data['args'])
                 except Exception as exc:result={'ok':False,'message':str(exc)}
                 write_json(path.with_name(path.name.replace('.request.json','.result.json')),result)
                 working.unlink()

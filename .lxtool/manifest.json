@@ -3,7 +3,7 @@
   "kind": "lx-tool",
   "name": "LXMaxAnimation",
   "description": "连接 Max，以 T-pose 管理角色、完整动画场景和 Pose，编辑独立 Clip 配置。",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "category": "动画管线",
   "icon": ".lxtool/icon.png",
   "readme": ".lxtool/README.md",
@@ -12,24 +12,24 @@
   "actions": {},
   "files": {
     ".lxtool/icon.png": "7a100cb728acb642ab228373a4bff7475b3704aafbcad7863531322217bebfd2",
-    ".lxtool/README.md": "b9e2bc82cf07f2ddd85255372522c67348c18068dc63f65d3fb50d7d26d7a7ae",
+    ".lxtool/README.md": "36e5e984b77756eccf15cae44e64ccaf53072061b0afbddec7eb40be363e414b",
     ".lxtool/panel.json": "8dbce71d0ca9feb12cbf3d05b82693b3f8c7254a05f0ed91a305a8c0fb31cdd2",
     "ui/__init__.py": "832ba713741f115fd0f348ffeb5a036e7530f4a6702e2dd341b135f0d17c6b5a",
     "ui/max_connection.py": "127487795232286b023aaaae265af9277f2cf024af92cb2c2ca15c24c485e4dd",
-    "ui/library.py": "db0693fa8d13bbb813336e4c15077c2f408e254550805b9eb6ccef6dabd31d60",
+    "ui/library.py": "4ffac672c2c423578ee3cf937de8bbbef3ddd7b9d02b9504bf4352425ff14524",
     "ui/integrations.py": "99fe30489409ec23f00e378d28b937a1e0c0a0a41e3d48e79173e652b70573d5",
-    "ui/panel.py": "287272de9923e16aff76ba7882c73a64e15554e94b9cf4997cac5ec5c930df85",
+    "ui/panel.py": "1cb6ff10720622c4b67e1b1c921ed5241992f2417e9c0312d94a591f528a0451",
     "ui/clips.py": "834a201ffb12269e18600b2a81b9eb445317aaa4575a4895ab309e0e183cfebf",
-    "ui/clip_editor.py": "0e24dd69e4ec73c1e2ac0f53d214cfd95cc736cd5b3f97ec47ad2f888628e060",
-    "ui/dialogs.py": "87548b1375c53e0b33a3eed972b3a8f9d0828831ff69fcc34979dceb494cfbda",
+    "ui/clip_editor.py": "c6bfef1b894fe0f33306db8aa3e434aca4e2d6a0e99c59b8a2344fb4ca98b91d",
+    "ui/dialogs.py": "6a3c71f34704bdadba3d4ee177abc725180e5eaf0d067df77b30a59c6e7d7727",
     "ui/widgets.py": "020da43fdfe7c51ef7cb0c027e3e61afa07d5d30d717330309fa09690d386df5",
     "ui/fbx_settings.py": "c1ff75b714af2d811a776a0b258f5b5f8ebda60b47ac2e04b7b7abd4d8a515d7",
     "ui/unity-schema.json": "abe76da07ee01974a15813d9a64984714a6f5b5792f56dddf6e2520bda9c38b7",
     "ui/icons/chevron-down.svg": "5a754cf77e5b0e936a71a9300ffcab6d97e405ecb6bc06fa169c26b234511e0b",
     "ui/icons/chevron-up.svg": "c6f9c0ce9ab58e0acbf8ca9dcced8ded341ce07d92d07c545f7915b0e8de2a7e",
     "max/bootstrap.ms": "4d571cdb39f236f9fe460213246d7b962948c9efe9eebe7792ca4a43aa3f6a53",
-    "max/bridge.py": "f8cb30d056df41c395314a496ae3f253f4ef91cbfef96bf4d0755068648ee93f"
+    "max/bridge.py": "bb9a5271581a9bdb44244c104a445a7c47c3aec3c7cb6a18d126480c454ab760"
   },
-  "releaseNotes": "重排角色资产操作，区分保存、打开场景、读取姿势和打键。动画可在当前场景写入指定目标帧段；没有轨道的旧版本可打开后另存。每条资产默认最新版本，历史版本用下拉框切换。删除可针对所选动画版本或所有同名版本，归档到回收目录。已连接旧版桥的 Max 需运行一次新版连接脚本。",
-  "publishedAt": "2026-11-01"
+  "releaseNotes": "创建角色时同步建立首个空资产，动画、Pose 和 T-pose 可单独创建占位。分类栏内切换资产版本。主区统一为保存修改、覆盖场景和覆盖帧。三种资产均保存完整 Max 场景与可归档贴图，覆盖场景后显示正在编辑的资产。动画覆盖帧自动缩放到指定范围，Pose 和 T-pose 覆盖当前帧。已连接旧桥接的 Max 需运行一次新版连接脚本。",
+  "publishedAt": "2026-11-21"
 }

@@ -82,7 +82,7 @@ with tempfile.TemporaryDirectory() as temp:
     assert not after['clips'][1]['settings']['lockRootPositionXZ']
     panel.editor.importer.controls['globalScale'].setValue(0.01);panel.editor.flush()
     assert clips.load(library,animation)['fbxSettings']['globalScale']==0.01
-    # Inline metadata editing persists; double-click cancels delayed editing and only loads.
+    # Inline metadata editing persists; double-click leaves the working scene alone.
     asset_item=panel.assets.currentItem();asset_item.setText(3,'新的备注')
     assert library.list_assets('测试角色','新的备注')[0][0]['id']==animation['id']
     loaded=[];panel.send_to_max=lambda asset,**options:loaded.append(asset['id'])
@@ -95,7 +95,7 @@ with tempfile.TemporaryDirectory() as temp:
     assert library.list_assets('测试角色','Walk_Run')[0][0]['id']==animation['id']
     QTest.mouseDClick(panel.assets.viewport(),Qt.MouseButton.LeftButton,pos=point)
     QTest.qWait(QApplication.doubleClickInterval()+150)
-    assert loaded==[animation['id']]
+    assert not loaded
     second=library.publish(animation['character'],'Walk_Run','animation',source,'asset.fbx',metadata=metadata)
     panel.assets.setCurrentItem(None);panel.refresh_assets(select_id=second['id'])
     assert panel.assets.topLevelItemCount()==3 and panel.version_choice.count()==2
@@ -138,5 +138,27 @@ with tempfile.TemporaryDirectory() as temp:
         panel.gallery.delete_role()
     assert '另一个角色' not in library.characters()
     assert len(list((library.root/'.staging/deleted-characters').glob('*/character.json')))==1
+    from ui.dialogs import CreateAssetDialog
+    def enter_dialog(dialog):
+        dialog.character.setText('新角色')
+        dialog.name.setText('第一条动画')
+        dialog.grab().save(str(output/'create-character.png'))
+        return QDialog.DialogCode.Accepted
+    with patch.object(CreateAssetDialog,'exec',enter_dialog):
+        panel.create_asset(new_character=True)
+    selected=panel.selected_asset()
+    assert selected['placeholder'] and selected['character']=='新角色'
+    assert panel.save_button.isEnabled() and not panel.apply_button.isEnabled() and not panel.key_asset.isEnabled()
+    assert not panel.editor.isEnabled()
+    assert [panel.save_button.text(),panel.apply_button.text(),panel.key_asset.text()]==['保存修改','覆盖场景','覆盖帧']
+    panel.grab().save(str(output/'panel-placeholder.png'))
+    (source/'source.max').write_bytes(b'full Max fixture')
+    (source/'animation-keys.json').write_text('{}')
+    saved=library.save_asset_revision(selected,'animation',source,'source.max',dict(metadata,fullCharacterScene=True))
+    assert library.verify(saved).name=='source.max'
+    assert library.character_info('新角色')['reference']['id']==saved['id']
+    panel.refresh_assets(select_id=saved['id'])
+    assert panel.version_choice.count()==1
+    assert panel.apply_button.isEnabled() and panel.key_asset.isEnabled()
     panel.shutdown();panel.shutdown();shell.close()
 print('UI passed: embedded widget, sorting/search, role category gallery, independent clip settings, validation and persistence')

@@ -1,5 +1,6 @@
 """LXTool embedded character and animation workspace; no standalone application."""
 from pathlib import Path
+import os
 import shutil
 import time
 from PySide6.QtCore import Qt,QTimer,QThread,Signal,QSize
@@ -10,7 +11,7 @@ from .library import Library,KINDS,read_json,contained
 from . import integrations as host
 from . import max_connection
 from .clip_editor import ClipEditor
-from .dialogs import CharacterDialog,CaptureDialog
+from .dialogs import CharacterDialog,CreateAssetDialog
 from .widgets import WheelRouter,AssetTree,ElidedLabel
 
 
@@ -90,7 +91,11 @@ class Panel(QWidget):
         connection_row=QHBoxLayout()
         self.connection=ElidedLabel('尚未连接 Max')
         connection_row.addWidget(self.connection,1)
-        self.register_character=self.button('从 Max 登记角色',lambda:self.capture('model'))
+        self.editing_asset=self.settings.get('editingAsset')
+        self.editing_label=ElidedLabel('当前编辑：未绑定资产')
+        self.register_character=self.button('创建角色',lambda:self.create_asset(new_character=True))
+        self.editing_label.setStyleSheet("color:#526747;font-weight:600;")
+        connection_row.addWidget(self.editing_label,1)
         connection_row.addWidget(self.register_character)
         outer.addLayout(connection_row)
         self.narrow_tabs=QTabBar();self.narrow_tabs.addTab('资产浏览');self.narrow_tabs.addTab('资产 / Clip 编辑');self.narrow_tabs.setExpanding(True)
@@ -100,16 +105,14 @@ class Panel(QWidget):
         self.search=QLineEdit();self.search.setPlaceholderText('搜索动画 / Pose / 备注');self.search.textChanged.connect(lambda:self.guard(self.refresh_assets));leftbox.addWidget(self.search)
         row=QHBoxLayout();self.kind=QComboBox();self.kind.addItem('全部资产','');[self.kind.addItem(v,k) for k,v in KINDS.items()]
         self.kind.currentIndexChanged.connect(lambda:self.guard(self.refresh_assets));row.addWidget(self.kind,1)
+        self.version_choice=QComboBox()
+        self.version_choice.setAccessibleName('资产版本')
+        self.version_choice.setPlaceholderText('版本')
+        self.version_choice.setToolTip('切换所选资产的版本')
+        self.version_choice.currentIndexChanged.connect(self.asset_version_changed)
+        self.version_choice.setMaximumWidth(110)
+        row.addWidget(self.version_choice)
         leftbox.addLayout(row)
-        capture_row=QHBoxLayout()
-        self.capture_pose=self.button('保存当前帧 Pose',lambda:self.capture('pose'))
-        self.capture_animation=self.button('保存动画',lambda:self.capture('animation'))
-        capture_row.addWidget(self.capture_pose)
-        capture_row.addWidget(self.capture_animation)
-        leftbox.addWidget(QLabel('从 Max 保存到角色库'))
-        leftbox.addLayout(capture_row)
-        self.capture_tpose=self.button('保存角色 T-pose',self.capture_current_tpose)
-        leftbox.addWidget(self.capture_tpose)
         self.assets=AssetTree();self.assets.setAlternatingRowColors(True);self.assets.setHeaderLabels(['名称','类型','版本数','备注']);self.assets.setRootIsDecorated(False);self.assets.setSortingEnabled(True);self.assets.sortItems(0,Qt.SortOrder.AscendingOrder)
         self.assets.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.assets.header().setCascadingSectionResizes(False)
@@ -117,26 +120,26 @@ class Panel(QWidget):
         self.assets.header().setToolTip("拖动表头分隔线，调整分隔线左侧的列")
         self.assets.setColumnWidth(0,125)
         self.assets.setColumnWidth(1,72);self.assets.setColumnWidth(2,58)
-        self.assets.currentItemChanged.connect(self.asset_changed);self.assets.itemDoubleClicked.connect(lambda *_:self.guard(lambda:self.send_to_max(self.selected_asset(),key=False)))
+        self.assets.currentItemChanged.connect(self.asset_changed)
         self.assets.itemChanged.connect(self.asset_metadata_changed);leftbox.addWidget(self.assets,1)
-        hint=ElidedLabel('每条资产默认最新版本 · 在右侧切换版本');leftbox.addWidget(hint)
+        management=QHBoxLayout()
+        self.create_asset_button=self.button('创建资产',self.create_asset)
+        management.addWidget(self.create_asset_button)
+        leftbox.addLayout(management)
         self.split.addWidget(left)
         self.right=right=QWidget();right.setMinimumWidth(340);rightbox=QVBoxLayout(right);rightbox.setContentsMargins(4,4,0,0)
-        row=QHBoxLayout();self.selection_label=ElidedLabel('未选择资产');self.selection_label.setStyleSheet('font-weight:600');row.addWidget(self.selection_label,1)
-        self.version_choice=QComboBox()
-        self.version_choice.setAccessibleName('资产版本')
-        self.version_choice.currentIndexChanged.connect(self.asset_version_changed)
-        self.version_choice.setMaximumWidth(104)
-        row.addWidget(self.version_choice)
-        self.apply_button=self.button('打开 Max 场景',lambda:self.send_to_max(self.selected_asset(),key=False))
-        self.save_button=self.button('保存新版本',self.overwrite)
-        row.addWidget(self.apply_button);row.addWidget(self.save_button)
+        self.selection_label=ElidedLabel('未选择资产');self.selection_label.setStyleSheet('font-size:15px;font-weight:650')
+        selection=QHBoxLayout();selection.addWidget(self.selection_label,3)
+        self.asset_summary=ElidedLabel('从资产列表选择一项');selection.addWidget(self.asset_summary,2)
+        rightbox.addLayout(selection)
+        row=QHBoxLayout()
+        self.save_button=self.button('保存修改',self.save_changes)
+        self.apply_button=self.button('覆盖场景',lambda:self.send_to_max(self.selected_asset()))
+        self.key_asset=self.button('覆盖帧',self.key_selected_asset)
+        for button in (self.save_button,self.apply_button,self.key_asset):
+            row.addWidget(button,1)
+        self.save_button.setStyleSheet("QPushButton:enabled {background:#dcebc9;border-color:#b8cba0;font-weight:600;}")
         rightbox.addLayout(row)
-        leftbox.addWidget(QLabel('在当前 Max 场景写入关键帧'))
-        key_grid=QGridLayout()
-        self.key_current=self.button('当前姿势打键',self.key_current_pose)
-        self.key_tpose=self.button('T-pose 打到当前帧',self.key_character_tpose)
-        self.key_asset=self.button('所选 Pose 打到当前帧',self.key_selected_asset)
         self.delete_animation_button=QToolButton()
         self.delete_animation_button.setText('删除动画…')
         self.delete_animation_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -144,13 +147,10 @@ class Panel(QWidget):
         delete_menu.addAction('删除所选版本',lambda:self.guard(lambda:self.delete_animation(False)))
         delete_menu.addAction('删除整条动画',lambda:self.guard(lambda:self.delete_animation(True)))
         self.delete_animation_button.setMenu(delete_menu)
-        for index,widget in enumerate((self.key_current,self.key_tpose,self.key_asset,self.delete_animation_button)):
-            key_grid.addWidget(widget,index//2,index%2)
-        leftbox.addLayout(key_grid)
-        self.asset_summary=ElidedLabel('从左侧选择资产；从 Max 保存才会更新库。');rightbox.addWidget(self.asset_summary)
+        management.addWidget(self.delete_animation_button)
         self.editor=ClipEditor();self.editor.message.connect(self.set_status);rightbox.addWidget(self.editor,1)
         self.split.addWidget(right);self.split.setSizes([300,700]);self.split.setStretchFactor(0,1);self.split.setStretchFactor(1,2);self.split.setChildrenCollapsible(False)
-        self.status=ElidedLabel('先连接 Max，再从角色库导入 T-pose。');outer.addWidget(self.status)
+        self.status=ElidedLabel('先创建角色和资产，再连接 Max 保存修改。');outer.addWidget(self.status)
         draft_path=context.data_root/'clip-drafts.json'
         if draft_path.is_file():self.guard(lambda:setattr(self.editor,'recovery',read_json(draft_path)))
         self.editor.restore_view(self.settings.get('editorView',{}))
@@ -186,7 +186,7 @@ class Panel(QWidget):
     def idle(self):
         if self.busy():raise ValueError('当前任务尚未完成，请等待。')
     def persist(self):
-        self.settings.update(character=self.active_character,session=self.active_session,editorView=self.editor.view_state(),selectedAssets=self.remembered_assets,assetSearch=self.search.text(),assetKind=self.kind.currentData())
+        self.settings.update(character=self.active_character,session=self.active_session,editorView=self.editor.view_state(),selectedAssets=self.remembered_assets,editingAsset=self.editing_asset,assetSearch=self.search.text(),assetKind=self.kind.currentData())
         if self.library:self.settings['library']=str(self.library.root)
         self.context.save_settings(self.settings)
     def run_job(self,fn,label,done=None):
@@ -301,6 +301,7 @@ class Panel(QWidget):
                 suffix=' · 最新' if index==0 else ''
                 self.version_choice.addItem(f"v{asset['_displayVersion']:03d}{suffix}",asset)
                 self.version_choice.setItemData(index,asset['revision'],Qt.ItemDataRole.ToolTipRole)
+            if versions:self.version_choice.setCurrentIndex(0)
             if selected:
                 index=next(i for i,asset in enumerate(versions) if asset['id']==selected['id'])
                 self.version_choice.setCurrentIndex(index)
@@ -352,43 +353,91 @@ class Panel(QWidget):
         script=self.context.resource('max/bootstrap.ms')
         QApplication.clipboard().setText(str(script))
         QMessageBox.information(self,'连接 Max',f'在需要连接的 Max 窗口中，通过 Scripting → Run Script 运行：\n\n{script}\n\n随后点击“连接 Max”选择该窗口。一次只绑定一个窗口。')
-    def capture(self,kind,update=None,replace=None):
-        self.idle();library=self.require_library();session=self.selected_session();self.editor.flush()
-        info=self.character_info() if kind!='model' else None
-        dialog=CaptureDialog(self,kind,update)
-        if replace:dialog.name.setText(replace['name']);dialog.notes.setText(replace.get('notes',''))
-        if not replace and not dialog.exec():return
-        name=dialog.name.text().strip();character=name if kind=='model' else self.active_character
-        if kind=='model' and not update and any(c.casefold()==name.casefold() for c in library.characters()):raise ValueError('角色已存在，请使用更新 T-pose。')
-        character_capture=kind=='model'
-        if character_capture and session.get('fullCharacterScene')!=1:
-            raise ValueError('请在目标 Max 窗口运行新版连接脚本一次，再保存完整角色场景。')
-        asset_kind=dialog.initial_kind.currentData() if character_capture and not update else kind
-        args={'kind':asset_kind,'rig':dialog.rig.currentText() if character_capture else info.get('rig','Generic'),
-              'sceneRange':True,'captureAvatar':character_capture and dialog.avatar.isChecked()}
-        if info:
-            metadata=info['reference']['metadata']
-            args['includeTextures']=bool(metadata.get('includeTextures',False))
-            expected=metadata.get('signature')
-            if expected is None:raise ValueError('角色缺少可匹配的对象清单，请检查重名对象并更新 T-pose。')
-            args['expected']=expected
-            if dialog.selected_role_only.isChecked():
-                args['selectedRoleOnly']=True
-        else:
-            args['fullCharacterScene']=True
-        stage=library.stage()
+    def create_asset(self,new_character=False):
+        self.idle()
+        library=self.require_library()
+        if not new_character and not self.active_character:
+            raise ValueError('请先创建角色。')
+        dialog=CreateAssetDialog(self,new_character)
+        if not dialog.exec():
+            return
+        self.editor.flush()
+        character=dialog.character.text().strip() if new_character else self.active_character
+        asset=library.create_asset(character,dialog.name.text(),dialog.kind.currentData(),new_character)
+        self.active_character=character
+        self.editor.set_asset(None,None)
+        self.kind.setCurrentIndex(0)
+        self.search.clear()
+        self.update_character_header()
+        self.refresh_assets(flush=False,select_id=asset['id'])
+        if self.gallery:self.gallery.accept()
+        if self.narrow_tabs.isVisible():self.narrow_tabs.setCurrentIndex(1)
+        self.persist()
+        self.set_status('已创建空资产，可在 Max 准备场景后保存修改。')
+
+    def save_changes(self):
+        self.idle()
+        selected=self.selected_asset()
+        self.editor.flush()
+        session=self.selected_session()
+        if session.get('assetWorkspace')!=1:
+            raise ValueError('请在目标 Max 中运行新版连接脚本。')
+        editing=self.bound_asset(session)
+        dialog=QDialog(self)
+        dialog.setWindowTitle('保存修改')
+        dialog.setMinimumWidth(380)
+        form=QFormLayout(dialog)
+        form.addRow('目标资产',QLabel(selected['character']+' / '+selected['name']))
+        if editing and editing['id']!=selected['id']:
+            form.addRow('当前编辑',QLabel(editing['character']+' / '+editing['name']))
+        kind=QComboBox()
+        for value,title in [('animation','动画 · 整个时间轴'),('pose','Pose · 当前帧'),('model','T-pose · 当前帧')]:
+            kind.addItem(title,value)
+        kind.setCurrentIndex(kind.findData(selected['kind']))
+        form.addRow('保存类型',kind)
+        rig=QComboBox()
+        rig.addItems(['Generic','Biped','CAT'])
+        info=self.library.character_info(selected['character'])
+        rig.setCurrentText(selected['metadata'].get('rig',info.get('rig','Generic')))
+        form.addRow('骨架类型',rig)
+        hint=QLabel('保存完整 Max 场景和可找到的贴图，生成新版本。')
+        hint.setWordWrap(True);form.addRow(hint)
+        buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText('保存新版本')
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('取消')
+        buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);form.addRow(buttons)
+        if not dialog.exec():
+            return
+        stage=self.library.stage()
         try:
-            result=host.request(session,'export',directory=str(stage),**args)
+            result=host.request(session,'saveWorkspaceAsset',directory=str(stage),kind=kind.currentData(),
+                                rig=rig.currentText(),expectedScene=session.get('scene',''))
         except Exception:
             stage.rmdir()
             raise
-        self.pending={'result':str(result),'time':time.time(),'stage':stage,'kind':asset_kind,'name':name,'character':character,
-                      'characterCapture':character_capture,'category':dialog.category.currentData() or '',
-                      'update':bool(update),'notes':dialog.notes.text(),'replace':replace,'session':session['directory'],'type':'export'}
-        self.set_status('正在读取所连接 Max 的当前场景…')
-    def capture_current_tpose(self):
-        if not self.active_character:raise ValueError('请先选择角色。')
-        self.capture('model',update=self.active_character)
+        self.pending=dict(result=str(result),time=time.time(),stage=stage,type='export',
+                          kind=kind.currentData(),character=selected['character'],replace=selected,
+                          session=session['directory'],scene=session.get('scene',''))
+        self.set_status('正在保存 Max 场景…')
+
+    @staticmethod
+    def scene_matches(first,second):
+        return bool(first and second and os.path.normcase(os.path.normpath(first))==os.path.normcase(os.path.normpath(second)))
+
+    def bound_asset(self,session):
+        asset=self.editing_asset
+        if (asset and self.library and asset.get('library')==str(self.library.root)
+                and asset.get('session')==session['directory']
+                and self.scene_matches(asset.get('scene'),session.get('scene'))
+                and (not asset.get('directory') or Path(asset['directory'],'asset.json').is_file())):
+            return asset
+        return None
+
+    def bind_asset(self,asset,session,scene):
+        self.editing_asset=dict(id=asset['id'],name=asset['name'],kind=asset['kind'],character=asset['character'],
+                                session=session,scene=scene,library=str(self.library.root),directory=asset['_directory'])
+        self.editing_label.setText('当前编辑：'+asset['character']+' / '+asset['name'])
+        self.persist()
 
     def delete_animation(self,all_versions):
         self.idle()
@@ -404,18 +453,6 @@ class Panel(QWidget):
         self.persist()
         self.set_status(f'已将 {count} 个动画版本移入回收目录。')
 
-    def key_current_pose(self):
-        self.idle();self.editor.flush();session=self.selected_session()
-        info=self.character_info()
-        signature=info['reference']['metadata'].get('signature')
-        if not signature:raise ValueError('角色缺少可匹配的对象清单。')
-        self.submit_import(session,operation='keyCurrent',signature=signature,rig=info.get('rig','Generic'))
-
-    def key_character_tpose(self):
-        asset=self.character_info()['tpose']
-        if not asset:raise ValueError('此角色还没有 T-pose，请先保存。')
-        self.send_to_max(asset,action='keyTpose')
-
     def key_selected_asset(self):
         asset=self.selected_asset()
         if asset['kind']=='pose':
@@ -426,7 +463,7 @@ class Panel(QWidget):
             session=self.selected_session()
             meta=asset['metadata']
             dialog=QDialog(self)
-            dialog.setWindowTitle('动画打键到当前 Max 场景')
+            dialog.setWindowTitle('覆盖帧 · 动画')
             form=QFormLayout(dialog)
             start=QSpinBox()
             end=QSpinBox()
@@ -434,55 +471,70 @@ class Panel(QWidget):
                 field.setRange(-1000000,1000000)
             start.setValue(int(session.get('frame',0)))
             end.setValue(int(start.value()+meta['end']-meta['start']))
+            hint=QLabel('动画会自动缩放到指定帧段。')
+            form.addRow(hint)
             form.addRow('目标起始帧',start)
             form.addRow('目标结束帧',end)
             buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+            buttons.button(QDialogButtonBox.StandardButton.Ok).setText('覆盖帧')
+            buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('取消')
             buttons.accepted.connect(dialog.accept)
             buttons.rejected.connect(dialog.reject)
             form.addRow(buttons)
             if dialog.exec():
+                if end.value()<start.value() or (end.value()==start.value() and meta['end']>meta['start']):
+                    raise ValueError('多帧动画的结束帧必须大于起始帧。')
                 self.send_to_max(asset,action='keyAnimation',start=start.value(),end=end.value())
         else:
-            self.key_character_tpose()
+            self.send_to_max(asset,action='keyTpose')
 
-    def submit_import(self,session,**args):
-        pose_operation=bool(args.get('operation') or args.get('kind')=='pose')
-        if pose_operation and session.get('keyAssetOperations')!=1:
-            raise ValueError('请先在目标 Max 窗口运行新版连接脚本，再读取 Pose 或打键。')
-        result=host.request(session,'keyAsset' if pose_operation else 'import',**args)
-        self.pending={'result':str(result),'time':time.time(),'type':'import','session':session['directory']}
-        self.set_status('正在向 Max 应用操作…')
-
-    def overwrite(self):
-        asset=self.selected_asset()
-        if asset['kind']=='model':self.capture('model',update=self.active_character)
-        else:self.capture(asset['kind'],replace=asset)
     def send_to_max(self,asset,*,key=False,action=None,**options):
         self.idle();self.editor.flush();session=self.selected_session();library=self.library
-        if not action and asset['kind'] in ('animation','model'):
+        if asset.get('placeholder'):raise ValueError('请先为此空资产保存修改。')
+        if session.get('assetWorkspace')!=1:
+            raise ValueError('请在目标 Max 中运行新版连接脚本。')
+        cover_scene=not key and not action
+        if cover_scene:
+            if 'source.max' not in asset['files']:raise ValueError('此旧版本没有完整 Max 场景，可使用「覆盖帧」。')
             scene=Path(session.get('scene') or '未命名场景').name
-            prompt=f'将在 Max（PID {session["pid"]}）打开资产工作副本，替换当前场景「{scene}」。未保存的修改可能丢失，确定继续？'
-            if QMessageBox.question(self,'替换当前 Max 场景',prompt)!=QMessageBox.StandardButton.Yes:
+            prompt=f'用「{asset["name"]}」覆盖 Max（PID {session["pid"]}）中的「{scene}」？未保存的修改可能丢失。'
+            if QMessageBox.question(self,'覆盖场景',prompt)!=QMessageBox.StandardButton.Yes:
                 return
+        if cover_scene and asset['kind'] in ('pose','model'):
+            options['captureFrame']=asset['metadata'].get('frame')
         def ready(path):
-            self.submit_import(session,path=str(path),kind=asset['kind'],rig=asset.get('metadata',{}).get('rig','Generic'),
-                               operation=action,key=key,**options)
-        self.run_job(lambda:library.verify(asset),'正在校验库文件…',ready)
+            result=host.request(session,'coverScene' if cover_scene else 'keyAsset',path=str(path),
+                                kind=asset['kind'],rig=asset.get('metadata',{}).get('rig','Generic'),
+                                operation=action,key=key,expectedScene=session.get('scene',''),**options)
+            self.pending=dict(result=str(result),time=time.time(),type='import',session=session['directory'],
+                              coveredAsset=asset if cover_scene else None)
+            self.set_status('正在覆盖场景…' if cover_scene else '正在覆盖帧…')
+        self.run_job(lambda:library.verify(asset),'正在校验资产文件…',ready)
+
     def update_selection_controls(self,asset):
+        ready=bool(asset and not asset.get('placeholder'))
         self.save_button.setEnabled(asset is not None)
-        self.apply_button.setEnabled(asset is not None)
+        self.apply_button.setEnabled(ready and 'source.max' in asset['files'])
         kind=asset['kind'] if asset else None
-        self.apply_button.setText({'pose':'读取所选 Pose','animation':'打开所选动画场景','model':'打开所选 T-pose 场景'}.get(kind,'读取资产'))
-        self.key_asset.setText('动画打键到帧段…' if kind=='animation' else '所选 Pose 打到当前帧')
-        self.key_asset.setEnabled(kind in ('pose','animation'))
+        can_key=ready and ((kind=='pose' and ('pose.json' in asset['files'] or asset['main'].endswith('.json')))
+                           or (kind=='model' and 'tpose.json' in asset['files'])
+                           or (kind=='animation' and 'animation-keys.json' in asset['files']))
+        self.key_asset.setEnabled(can_key)
+        self.key_asset.setToolTip('此版本没有可覆盖到帧的数据。' if ready and not can_key else '')
+        self.apply_button.setToolTip('此版本没有完整 Max 场景。' if ready and not self.apply_button.isEnabled() else '')
+        self.create_asset_button.setEnabled(bool(self.active_character))
         self.delete_animation_button.setEnabled(kind=='animation')
         if asset:self.remembered_assets[self.active_character]=asset['id']
         self.selection_label.setText(asset['name'] if asset else '未选择资产')
-        if asset:
+        if asset and asset.get('placeholder'):
+            self.asset_summary.setText(KINDS[asset['kind']]+' · 空资产，等待保存修改')
+        elif asset:
             meta=asset.get('metadata',{});kind=KINDS[asset['kind']]
-            detail=f"{kind} · {meta.get('rig','Generic')} · {meta.get('start','—')} — {meta.get('end','—')} 帧 · {meta.get('fps','—')} FPS"
+            frames=(f"{meta.get('start','—')} — {meta.get('end','—')} 帧" if asset['kind']=='animation'
+                    else f"第 {meta.get('frame','—')} 帧")
+            detail=f"{kind} · {frames}"
             self.asset_summary.setText(detail+(' · '+asset.get('notes','') if asset.get('notes') else ''))
-        else:self.asset_summary.setText('从左侧选择资产；从 Max 保存才会更新库。')
+        else:self.asset_summary.setText('从资产列表选择一项')
         self.selection_label.setToolTip(asset['name'] if asset else '')
 
     def asset_metadata_changed(self,item,column):
@@ -607,13 +659,8 @@ class Panel(QWidget):
         else:
             self.connection_state='Max 连接中' if self.launching else ('Max 已断开' if self.active_session else 'Max 未连接')
             self.connection.setText('○ '+self.connection_state)
-        connected=self.connection_state=='Max 已连接'
-        self.register_character.setEnabled(connected)
-        self.capture_pose.setEnabled(connected and bool(self.active_character))
-        self.capture_tpose.setEnabled(connected and bool(self.active_character))
-        self.key_current.setEnabled(connected and bool(self.active_character))
-        self.key_tpose.setEnabled(connected and bool(self.active_character))
-        self.capture_animation.setEnabled(connected and bool(self.active_character))
+        bound=self.bound_asset(matches[0]) if matches else None
+        self.editing_label.setText('当前编辑：'+bound['character']+' / '+bound['name'] if bound else '当前编辑：未绑定资产')
         pending=self.pending
         if not pending:return
         path=Path(pending['result'])
@@ -622,20 +669,23 @@ class Panel(QWidget):
             def consume():
                 result=read_json(path)
                 if not result.get('ok'):raise ValueError(result.get('message','Max 操作失败'))
-                if pending['type']=='import':self.set_status(result.get('message','完成。'));return
+                if pending['type']=='import':
+                    if pending['coveredAsset']:
+                        self.bind_asset(pending['coveredAsset'],pending['session'],result['working'])
+                    self.set_status(result.get('message','完成。'))
+                    return
                 library=self.library
                 def publish():
-                    if pending['characterCapture']:
-                        if result['main']!='source.max':raise ValueError('Max 未返回完整角色场景，请重新接入后再保存。')
-                        asset=library.import_character(pending['character'],pending['stage'],result['main'],result['metadata'],
-                                                       pending['category'],pending['update'],pending['kind'],pending['notes'])
-                    else:asset=library.publish(pending['character'],pending['name'],pending['kind'],pending['stage'],result['main'],pending['notes'],result['metadata'])
-                    if pending['replace']:
-                        warning=library.mark_superseded(pending['replace'],asset)
-                        if warning:result.setdefault('warnings',[]).append(warning)
+                    asset=library.save_asset_revision(pending['replace'],pending['kind'],pending['stage'],
+                                                      result['main'],result['metadata'])
+                    if asset.get('saveWarning'):
+                        result.setdefault('warnings',[]).append(asset['saveWarning'])
                     shutil.rmtree(pending['stage']);return asset
                 def finished(asset):
-                    self.active_character=pending['character'];self.editor.set_asset(None,None);self.update_character_header();self.refresh_assets(flush=False,select_id=asset['id']);self.persist()
+                    self.active_character=pending['character'];self.editor.set_asset(None,None)
+                    if self.kind.currentData() not in (None,'',asset['kind']):self.kind.setCurrentIndex(0)
+                    self.update_character_header();self.refresh_assets(flush=False,select_id=asset['id']);self.persist()
+                    self.bind_asset(asset,pending['session'],pending['scene'])
                     if self.gallery:self.gallery.reload_categories()
                     self.set_status('已更新库。'+(' · '+'; '.join(result.get('warnings',[])) if result.get('warnings') else ''))
                 self.run_job(publish,'正在归档 Max 场景与配置…',finished)

@@ -6,37 +6,37 @@ from PySide6.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QPushButto
 from .library import safe_name,contained
 
 
-class CaptureDialog(QDialog):
-    def __init__(self,panel,kind,update=None):
+class CreateAssetDialog(QDialog):
+    def __init__(self,panel,new_character=False):
         super().__init__(panel)
-        self.setWindowTitle('更新角色 T-pose' if update else '从 Max 导入角色' if kind=='model' else '从 Max 导入动画' if kind=='animation' else '保存当前帧 Pose')
-        self.resize(470,310);form=QFormLayout(self)
-        self.name=QLineEdit(update or '')
-        self.name.setReadOnly(bool(update));form.addRow('角色名' if kind=='model' else '名称',self.name)
-        self.category=QComboBox();self.category.addItem('未分类','')
-        for category in panel.library.categories():self.category.addItem(category,category)
-        self.selected_role_only=QCheckBox('只保存视口中选中的角色（适用于重定向场景）')
-        self.rig=QComboBox();self.rig.addItems(['Generic','Biped','CAT'])
-        self.initial_kind=QComboBox();self.initial_kind.addItem('动画','animation');self.initial_kind.addItem('T-pose','model')
-        self.avatar=QCheckBox('从当前视口生成头像');self.avatar.setChecked(True)
-        if kind=='model':
-            form.addRow('分类',self.category);form.addRow('骨骼类型',self.rig);form.addRow(self.avatar)
-            if not update:form.addRow('首次保存为',self.initial_kind)
-            label=QLabel('保存当前完整 Max 场景，包括未选中的对象、材质和可找到的贴图。保存 T-pose 前，请先将角色摆到参考姿态。')
-            if update:
-                info=panel.library.character_info(update);self.rig.setCurrentText(info.get('rig','Generic'));self.category.setCurrentIndex(max(0,self.category.findData(info.get('category',''))))
-        else:
-            label=QLabel('动画读取当前 Max 场景的起止帧与 FPS，保存完整场景。' if kind=='animation' else '读取当前帧的角色姿态与可记录的控制器数值。')
-        label.setWordWrap(True);form.addRow(label)
-        if kind!='model':
-            form.addRow(self.selected_role_only)
-        self.notes=QLineEdit();form.addRow('备注',self.notes)
+        self.setWindowTitle('创建角色与首个资产' if new_character else '创建资产')
+        self.setMinimumWidth(365)
+        form=QFormLayout(self)
+        self.character=QLineEdit()
+        if new_character:
+            form.addRow('角色名称',self.character)
+        self.kind=QComboBox()
+        for key,label in [('animation','动画'),('pose','Pose'),('model','T-pose')]:
+            self.kind.addItem(label,key)
+        self.name=QLineEdit()
+        form.addRow('资产名称',self.name)
+        form.addRow('资产类型',self.kind)
+        hint=QLabel('先创建空资产，再用「保存修改」存入 Max 场景。')
+        hint.setWordWrap(True)
+        form.addRow(hint)
+        self.new_character=new_character
         buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText('创建')
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('取消')
         buttons.accepted.connect(self.accept);buttons.rejected.connect(self.reject);form.addRow(buttons)
 
     def accept(self):
-        try:safe_name(self.name.text())
-        except ValueError as exc:QMessageBox.warning(self,'名称无效',str(exc));return
+        try:
+            if self.new_character:safe_name(self.character.text())
+            safe_name(self.name.text())
+        except ValueError as error:
+            QMessageBox.warning(self,'名称无效',str(error))
+            return
         super().accept()
 
 
@@ -53,13 +53,13 @@ class CharacterDialog(QDialog):
         self.cards.setMovement(QListWidget.Movement.Static);self.cards.setIconSize(QSize(110,110));self.cards.setGridSize(QSize(170,160));self.cards.setWordWrap(True)
         self.cards.itemDoubleClicked.connect(lambda *_:self.panel.guard(self.choose));layout.addWidget(self.cards,1)
         row=QHBoxLayout()
-        row.addWidget(self.button('从 Max 导入角色',lambda:panel.capture('model')))
+        row.addWidget(self.button('创建角色',lambda:panel.create_asset(new_character=True)))
         row.addWidget(self.button('删除角色',self.delete_role))
         more=QToolButton();more.setText('角色管理');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
-        for title,fn in [('更新 T-pose',self.update),('导出角色到 Max',self.export),('更换头像',self.avatar),('设置分类',self.set_category),('新建分类',self.add_category)]:menu.addAction(title,lambda fn=fn:self.panel.guard(fn))
+        for title,fn in [('更换头像',self.avatar),('设置分类',self.set_category),('新建分类',self.add_category)]:menu.addAction(title,lambda fn=fn:self.panel.guard(fn))
         more.setMenu(menu);row.addWidget(more);row.addStretch();row.addWidget(self.button('选择角色',self.choose))
         layout.addLayout(row)
-        hint=QLabel('双击头像选择角色；更新 T-pose 保留已有动画和 Pose。');hint.setWordWrap(True);layout.addWidget(hint)
+        hint=QLabel('双击头像选择角色，然后在资产列表管理内容。');hint.setWordWrap(True);layout.addWidget(hint)
         self.reload_categories()
 
     def button(self,title,fn):
@@ -87,19 +87,12 @@ class CharacterDialog(QDialog):
                 path=contained(library.root/'characters'/name,info['avatar'])
                 if path.is_file():icon=path
             item=QListWidgetItem(QIcon(str(icon)),name+'\n'+(info['category'] or '未分类'))
-            item.setData(Qt.ItemDataRole.UserRole,name);item.setToolTip(name+'\n'+('已有 T-pose' if info['tpose'] else ('已有初始动画，可补存 T-pose' if info['reference'] else '暂无角色场景')))
+            item.setData(Qt.ItemDataRole.UserRole,name);item.setToolTip(name+'\n'+('已有 T-pose' if info['tpose'] else ('已有角色场景，可补存 T-pose' if info['reference'] else '暂无角色场景')))
             self.cards.addItem(item)
             if selected==name:self.cards.setCurrentItem(item)
 
     def choose(self):
         self.panel.choose_character(self.selected());self.accept()
-
-    def update(self):self.panel.capture('model',update=self.selected())
-
-    def export(self):
-        asset=self.panel.library.character_info(self.selected())['reference']
-        if not asset:raise ValueError('角色没有可打开的 Max 场景。')
-        self.panel.send_to_max(asset)
 
     def delete_role(self):
         name=self.selected()

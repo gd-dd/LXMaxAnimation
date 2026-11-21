@@ -125,6 +125,31 @@ try:
     assert rt.getKeyIndex(keys,2)>0 and rt.getKeyIndex(keys,12)>0
     assert rt.getNodeByName('UnselectedCamera') is not None
     report['keyedAnimation']='Written to frames 30-50 with source keys preserved and scene unchanged'
+    current_scene=str(rt.maxFilePath)+str(rt.maxFileName)
+    workspace=output/'workspace-pose';workspace.mkdir()
+    rt.sliderTime=7
+    for action in ('saveWorkspaceAsset','coverScene'):
+        try:bridge['execute_request'](action,{'expectedScene':'wrong-scene.max'})
+        except ValueError as exc:assert '场景已切换' in str(exc)
+        else:raise AssertionError('Stale scene accepted')
+    capture_value=float(rt.getNodeByName('RoleControl').finger)
+    saved=bridge['execute_request']('saveWorkspaceAsset',dict(kind='pose',directory=str(workspace),expectedScene=current_scene))
+    assert saved['metadata']['workspaceAsset'] and saved['metadata']['start']==saved['metadata']['end']==7
+    snapshot=workspace/'source.max'
+    assert snapshot.is_file() and (workspace/'pose.json').is_file()
+    rt.Box(name='OverwriteTest')
+    opened=bridge['execute_request']('coverScene',dict(kind='pose',path=str(snapshot),expectedScene=current_scene,captureFrame=saved['metadata']['frame']))
+    assert rt.getNodeByName('OverwriteTest') is None and rt.getNodeByName('HiddenUnselected').isHidden
+    assert float(rt.sliderTime)==7
+    assert str(Path(opened['working']))==str(Path(str(rt.maxFilePath)+str(rt.maxFileName)))
+    assert Path(str(rt.getNodeByName('RoleMesh').material.diffuseMap.filename)).is_file()
+    rt.sliderTime=9
+    assert float(rt.sliderTime)==9
+    bridge['execute_request']('keyAsset',dict(kind='pose',path=str(snapshot),key=True,expectedScene=opened['working']))
+    key_control=rt.getNodeByName('RoleControl')
+    assert rt.getKeyIndex(rt.getPropertyController(key_control,'finger'),9)>0
+    assert abs(float(key_control.finger)-capture_value)<0.01
+    report['workspacePose']='Whole native scene and textures reopened at capture frame; pose keyed at frame 9'
     report['nativeRole']='Full scene and copied material bitmap reopen with original bitmap unavailable'
     report.update(ok=True,animation=result,integrity='extra/missing rejected without output',isolation='Max save changes working scene only')
 except Exception:report['error']=traceback.format_exc()

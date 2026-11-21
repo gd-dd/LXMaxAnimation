@@ -122,7 +122,7 @@ class ClipEditor(QWidget):
         if self.asset:self.clip_selection[self.asset['id']]=self.current_id
         self.library,self.asset=library,asset;self.current_id=None;self.data=None
         self.loading=True;self.table.clear();self.loading=False
-        active=bool(asset and asset['kind']=='animation');self.setEnabled(active)
+        active=bool(asset and asset['kind']=='animation' and not asset.get('placeholder'));self.setEnabled(active)
         self.setProperty('empty',not active);self.style().unpolish(self);self.style().polish(self)
         if not active:
             self.title.setText('Clip 拆分');self.source.setText('选择左侧动画，开始拆分和配置。')
