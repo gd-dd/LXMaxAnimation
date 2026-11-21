@@ -4,8 +4,8 @@ import shutil
 import time
 from PySide6.QtCore import Qt,QTimer,QThread,Signal,QSize
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QLineEdit,QTreeWidget,QTreeWidgetItem,
-    QComboBox,QFileDialog,QSplitter,QHeaderView,QTabBar,QSizePolicy,QLayout,QDialog,QDialogButtonBox,QFormLayout,QMessageBox,QInputDialog,QToolButton,QMenu,QApplication)
+from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QLabel,QPushButton,QLineEdit,QTreeWidget,QTreeWidgetItem,
+    QComboBox,QSpinBox,QFileDialog,QSplitter,QHeaderView,QTabBar,QSizePolicy,QLayout,QDialog,QDialogButtonBox,QFormLayout,QMessageBox,QInputDialog,QToolButton,QMenu,QApplication)
 from .library import Library,KINDS,read_json,contained
 from . import integrations as host
 from . import max_connection
@@ -102,26 +102,51 @@ class Panel(QWidget):
         self.kind.currentIndexChanged.connect(lambda:self.guard(self.refresh_assets));row.addWidget(self.kind,1)
         leftbox.addLayout(row)
         capture_row=QHBoxLayout()
-        self.capture_pose=self.button('保存 Pose',lambda:self.capture('pose'))
+        self.capture_pose=self.button('保存当前帧 Pose',lambda:self.capture('pose'))
         self.capture_animation=self.button('保存动画',lambda:self.capture('animation'))
         capture_row.addWidget(self.capture_pose)
         capture_row.addWidget(self.capture_animation)
+        leftbox.addWidget(QLabel('从 Max 保存到角色库'))
         leftbox.addLayout(capture_row)
-        self.assets=AssetTree();self.assets.setAlternatingRowColors(True);self.assets.setHeaderLabels(['名称','类型','版本','备注']);self.assets.setRootIsDecorated(False);self.assets.setSortingEnabled(True);self.assets.sortItems(0,Qt.SortOrder.AscendingOrder)
+        self.capture_tpose=self.button('保存角色 T-pose',self.capture_current_tpose)
+        leftbox.addWidget(self.capture_tpose)
+        self.assets=AssetTree();self.assets.setAlternatingRowColors(True);self.assets.setHeaderLabels(['名称','类型','版本数','备注']);self.assets.setRootIsDecorated(False);self.assets.setSortingEnabled(True);self.assets.sortItems(0,Qt.SortOrder.AscendingOrder)
         self.assets.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.assets.header().setCascadingSectionResizes(False)
         self.assets.header().setStretchLastSection(True)
         self.assets.header().setToolTip("拖动表头分隔线，调整分隔线左侧的列")
         self.assets.setColumnWidth(0,125)
         self.assets.setColumnWidth(1,72);self.assets.setColumnWidth(2,58)
-        self.assets.currentItemChanged.connect(self.asset_changed);self.assets.itemDoubleClicked.connect(lambda *_:self.guard(lambda:self.send_to_max(self.selected_asset())))
+        self.assets.currentItemChanged.connect(self.asset_changed);self.assets.itemDoubleClicked.connect(lambda *_:self.guard(lambda:self.send_to_max(self.selected_asset(),key=False)))
         self.assets.itemChanged.connect(self.asset_metadata_changed);leftbox.addWidget(self.assets,1)
-        hint=ElidedLabel('双击加载到 Max · 选中后单击名称 / 备注编辑');leftbox.addWidget(hint)
+        hint=ElidedLabel('每条资产默认最新版本 · 在右侧切换版本');leftbox.addWidget(hint)
         self.split.addWidget(left)
         self.right=right=QWidget();right.setMinimumWidth(340);rightbox=QVBoxLayout(right);rightbox.setContentsMargins(4,4,0,0)
         row=QHBoxLayout();self.selection_label=ElidedLabel('未选择资产');self.selection_label.setStyleSheet('font-weight:600');row.addWidget(self.selection_label,1)
-        self.apply_button=self.button('应用到 Max',lambda:self.send_to_max(self.selected_asset()));self.apply_button.setEnabled(False);row.addWidget(self.apply_button)
-        self.save_button=self.button('从 Max 保存',self.overwrite);self.save_button.setEnabled(False);row.addWidget(self.save_button);rightbox.addLayout(row)
+        self.version_choice=QComboBox()
+        self.version_choice.setAccessibleName('资产版本')
+        self.version_choice.currentIndexChanged.connect(self.asset_version_changed)
+        self.version_choice.setMaximumWidth(104)
+        row.addWidget(self.version_choice)
+        self.apply_button=self.button('打开 Max 场景',lambda:self.send_to_max(self.selected_asset(),key=False))
+        self.save_button=self.button('保存新版本',self.overwrite)
+        row.addWidget(self.apply_button);row.addWidget(self.save_button)
+        rightbox.addLayout(row)
+        leftbox.addWidget(QLabel('在当前 Max 场景写入关键帧'))
+        key_grid=QGridLayout()
+        self.key_current=self.button('当前姿势打键',self.key_current_pose)
+        self.key_tpose=self.button('T-pose 打到当前帧',self.key_character_tpose)
+        self.key_asset=self.button('所选 Pose 打到当前帧',self.key_selected_asset)
+        self.delete_animation_button=QToolButton()
+        self.delete_animation_button.setText('删除动画…')
+        self.delete_animation_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        delete_menu=QMenu(self.delete_animation_button)
+        delete_menu.addAction('删除所选版本',lambda:self.guard(lambda:self.delete_animation(False)))
+        delete_menu.addAction('删除整条动画',lambda:self.guard(lambda:self.delete_animation(True)))
+        self.delete_animation_button.setMenu(delete_menu)
+        for index,widget in enumerate((self.key_current,self.key_tpose,self.key_asset,self.delete_animation_button)):
+            key_grid.addWidget(widget,index//2,index%2)
+        leftbox.addLayout(key_grid)
         self.asset_summary=ElidedLabel('从左侧选择资产；从 Max 保存才会更新库。');rightbox.addWidget(self.asset_summary)
         self.editor=ClipEditor();self.editor.message.connect(self.set_status);rightbox.addWidget(self.editor,1)
         self.split.addWidget(right);self.split.setSizes([300,700]);self.split.setStretchFactor(0,1);self.split.setStretchFactor(1,2);self.split.setChildrenCollapsible(False)
@@ -190,7 +215,7 @@ class Panel(QWidget):
     def selected_asset(self):
         item=self.assets.currentItem()
         if not item:raise ValueError('请先选择一项资产。')
-        return item.data(0,Qt.ItemDataRole.UserRole)
+        return self.version_choice.currentData() or item.data(0,Qt.ItemDataRole.UserRole)
     def load_library(self,path):
         self.editor.flush();self.library=Library(path);self.library.initialize()
         names=self.library.characters();previous=self.settings.get('character')
@@ -229,34 +254,80 @@ class Panel(QWidget):
     def refresh_assets(self,*_,flush=True,select_id=None):
         if not self.library:return
         if flush:self.editor.flush()
-        if not select_id:select_id=self.selected_asset()['id'] if self.assets.currentItem() else self.remembered_assets.get(self.active_character)
+        selected_revision=select_id or (self.selected_asset()['id'] if self.assets.currentItem() else None)
+        select_id=selected_revision or self.remembered_assets.get(self.active_character)
         self.restoring=True;self.assets.setSortingEnabled(False);self.assets.clear()
         data,errors=self.library.list_assets(self.active_character) if self.active_character else ([],[])
-        versions={}
-        for asset in sorted(data,key=lambda a:a['created']):
-            key=(asset['kind'],asset['name']);versions[key]=versions.get(key,0)+1;asset['_displayVersion']=versions[key]
-        chosen=None
+        groups={}
         for asset in data:
             if self.kind.currentData() and asset['kind']!=self.kind.currentData():continue
-            if self.search.text().casefold() not in (asset['name']+' '+asset.get('notes','')).casefold():continue
-            item=QTreeWidgetItem([asset['name'],KINDS[asset['kind']],f"v{asset['_displayVersion']:03d}",asset.get('notes','')]);item.setToolTip(0,asset['name']);item.setToolTip(3,asset.get('notes',''));item.setToolTip(2,asset['revision']);item.setData(0,Qt.ItemDataRole.UserRole,asset)
+            groups.setdefault((asset['kind'],asset['name']),[]).append(asset)
+        chosen=None;chosen_version=None
+        for (kind,name),versions in groups.items():
+            latest=versions[0]
+            if not any(self.search.text().casefold() in (name+' '+a.get('notes','')).casefold() for a in versions):
+                continue
+            for number,version in enumerate(reversed(versions),1):
+                version['_displayVersion']=number
+            item=QTreeWidgetItem([name,KINDS[kind],str(len(versions)),latest.get('notes','')])
+            item.setToolTip(0,name);item.setToolTip(3,latest.get('notes',''))
+            item.setData(0,Qt.ItemDataRole.UserRole,latest)
+            item.setData(0,Qt.ItemDataRole.UserRole+1,versions)
             item.setFlags(item.flags()|Qt.ItemFlag.ItemIsEditable)
             self.assets.addTopLevelItem(item)
-            if asset['id']==select_id:chosen=item
+            # Keep the current group, while explicit capture can select its new revision.
+            if any(a['id']==select_id for a in versions):
+                chosen=item
+                chosen_version=next((a for a in versions if a['id']==selected_revision),None)
         self.assets.setSortingEnabled(True)
         if chosen:self.assets.setCurrentItem(chosen)
         self.restoring=False
-        asset=chosen.data(0,Qt.ItemDataRole.UserRole) if chosen else None
-        self.editor.set_asset(self.library,asset);self.update_selection_controls(asset)
+        self.load_asset_versions(chosen,chosen_version)
         if errors:self.set_status('索引异常：'+'; '.join(errors))
     def asset_changed(self,item,old):
         if self.restoring:return
         try:self.editor.flush()
         except Exception as exc:
             self.set_status(str(exc));self.restoring=True;self.assets.setCurrentItem(old);self.restoring=False;return
-        asset=item.data(0,Qt.ItemDataRole.UserRole) if item else None
-        self.guard(lambda:self.editor.set_asset(self.library,asset));self.update_selection_controls(asset)
-        if asset and self.narrow_tabs.isVisible():self.narrow_tabs.setCurrentIndex(1)
+        self.load_asset_versions(item)
+        if item and self.narrow_tabs.isVisible():self.narrow_tabs.setCurrentIndex(1)
+
+    def load_asset_versions(self,item,selected=None):
+        versions=item.data(0,Qt.ItemDataRole.UserRole+1) if item else []
+        self.version_choice.blockSignals(True)
+        try:
+            self.version_choice.clear()
+            for index,asset in enumerate(versions):
+                suffix=' · 最新' if index==0 else ''
+                self.version_choice.addItem(f"v{asset['_displayVersion']:03d}{suffix}",asset)
+                self.version_choice.setItemData(index,asset['revision'],Qt.ItemDataRole.ToolTipRole)
+            if selected:
+                index=next(i for i,asset in enumerate(versions) if asset['id']==selected['id'])
+                self.version_choice.setCurrentIndex(index)
+            self.version_choice.setEnabled(bool(versions))
+        finally:
+            self.version_choice.blockSignals(False)
+        asset=self.version_choice.currentData()
+        self.editor.set_asset(self.library,asset)
+        self.update_selection_controls(asset)
+
+    def asset_version_changed(self,index):
+        asset=self.version_choice.itemData(index)
+        if not asset:return
+        try:self.editor.flush()
+        except Exception as error:
+            self.set_status(str(error))
+            old=self.editor.asset
+            for i in range(self.version_choice.count()):
+                if old and self.version_choice.itemData(i)['id']==old['id']:
+                    self.version_choice.blockSignals(True)
+                    self.version_choice.setCurrentIndex(i)
+                    self.version_choice.blockSignals(False)
+                    break
+            return
+        self.editor.set_asset(self.library,asset)
+        self.update_selection_controls(asset)
+
     def install_connection(self):
         folder=max_connection.install('max-animation',self.context.resource('max/bootstrap.ms'))
         QMessageBox.information(self,'自动连接已安装','以后启动 Max 自动连接；当前窗口请通过“连接帮助”运行一次脚本，无需关闭场景。\n'+str(folder))
@@ -315,25 +386,96 @@ class Panel(QWidget):
                       'characterCapture':character_capture,'category':dialog.category.currentData() or '',
                       'update':bool(update),'notes':dialog.notes.text(),'replace':replace,'session':session['directory'],'type':'export'}
         self.set_status('正在读取所连接 Max 的当前场景…')
+    def capture_current_tpose(self):
+        if not self.active_character:raise ValueError('请先选择角色。')
+        self.capture('model',update=self.active_character)
+
+    def delete_animation(self,all_versions):
+        self.idle()
+        asset=self.selected_asset()
+        if asset['kind']!='animation':raise ValueError('请选择动画。')
+        subject='全部版本' if all_versions else f"版本 v{asset['_displayVersion']:03d}"
+        if QMessageBox.question(self,'删除动画',f'将「{asset["name"]}」的{subject}移入回收目录？')!=QMessageBox.StandardButton.Yes:
+            return
+        self.editor.flush()
+        count=self.library.delete_animation(asset,all_versions)
+        self.remembered_assets.pop(self.active_character,None)
+        self.refresh_assets(flush=False)
+        self.persist()
+        self.set_status(f'已将 {count} 个动画版本移入回收目录。')
+
+    def key_current_pose(self):
+        self.idle();self.editor.flush();session=self.selected_session()
+        info=self.character_info()
+        signature=info['reference']['metadata'].get('signature')
+        if not signature:raise ValueError('角色缺少可匹配的对象清单。')
+        self.submit_import(session,operation='keyCurrent',signature=signature,rig=info.get('rig','Generic'))
+
+    def key_character_tpose(self):
+        asset=self.character_info()['tpose']
+        if not asset:raise ValueError('此角色还没有 T-pose，请先保存。')
+        self.send_to_max(asset,action='keyTpose')
+
+    def key_selected_asset(self):
+        asset=self.selected_asset()
+        if asset['kind']=='pose':
+            self.send_to_max(asset,key=True)
+        elif asset['kind']=='animation':
+            if 'animation-keys.json' not in asset['files']:
+                raise ValueError('该版本没有可打键的轨道。请打开它，再保存一个新版动画。')
+            session=self.selected_session()
+            meta=asset['metadata']
+            dialog=QDialog(self)
+            dialog.setWindowTitle('动画打键到当前 Max 场景')
+            form=QFormLayout(dialog)
+            start=QSpinBox()
+            end=QSpinBox()
+            for field in (start,end):
+                field.setRange(-1000000,1000000)
+            start.setValue(int(session.get('frame',0)))
+            end.setValue(int(start.value()+meta['end']-meta['start']))
+            form.addRow('目标起始帧',start)
+            form.addRow('目标结束帧',end)
+            buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+            buttons.accepted.connect(dialog.accept)
+            buttons.rejected.connect(dialog.reject)
+            form.addRow(buttons)
+            if dialog.exec():
+                self.send_to_max(asset,action='keyAnimation',start=start.value(),end=end.value())
+        else:
+            self.key_character_tpose()
+
+    def submit_import(self,session,**args):
+        pose_operation=bool(args.get('operation') or args.get('kind')=='pose')
+        if pose_operation and session.get('keyAssetOperations')!=1:
+            raise ValueError('请先在目标 Max 窗口运行新版连接脚本，再读取 Pose 或打键。')
+        result=host.request(session,'keyAsset' if pose_operation else 'import',**args)
+        self.pending={'result':str(result),'time':time.time(),'type':'import','session':session['directory']}
+        self.set_status('正在向 Max 应用操作…')
+
     def overwrite(self):
         asset=self.selected_asset()
         if asset['kind']=='model':self.capture('model',update=self.active_character)
         else:self.capture(asset['kind'],replace=asset)
-    def send_to_max(self,asset):
+    def send_to_max(self,asset,*,key=False,action=None,**options):
         self.idle();self.editor.flush();session=self.selected_session();library=self.library
-        if asset['kind'] in ('animation','model'):
+        if not action and asset['kind'] in ('animation','model'):
             scene=Path(session.get('scene') or '未命名场景').name
             prompt=f'将在 Max（PID {session["pid"]}）打开资产工作副本，替换当前场景「{scene}」。未保存的修改可能丢失，确定继续？'
             if QMessageBox.question(self,'替换当前 Max 场景',prompt)!=QMessageBox.StandardButton.Yes:
                 return
         def ready(path):
-            result=host.request(session,'import',path=str(path),kind=asset['kind'],rig=asset.get('metadata',{}).get('rig','Generic'))
-            self.pending={'result':str(result),'time':time.time(),'type':'import','session':session['directory']}
-            self.set_status('正在替换 Max 当前场景…' if asset['kind']=='animation' else '正在向 Max 应用资产…')
+            self.submit_import(session,path=str(path),kind=asset['kind'],rig=asset.get('metadata',{}).get('rig','Generic'),
+                               operation=action,key=key,**options)
         self.run_job(lambda:library.verify(asset),'正在校验库文件…',ready)
     def update_selection_controls(self,asset):
         self.save_button.setEnabled(asset is not None)
         self.apply_button.setEnabled(asset is not None)
+        kind=asset['kind'] if asset else None
+        self.apply_button.setText({'pose':'读取所选 Pose','animation':'打开所选动画场景','model':'打开所选 T-pose 场景'}.get(kind,'读取资产'))
+        self.key_asset.setText('动画打键到帧段…' if kind=='animation' else '所选 Pose 打到当前帧')
+        self.key_asset.setEnabled(kind in ('pose','animation'))
+        self.delete_animation_button.setEnabled(kind=='animation')
         if asset:self.remembered_assets[self.active_character]=asset['id']
         self.selection_label.setText(asset['name'] if asset else '未选择资产')
         if asset:
@@ -351,12 +493,38 @@ class Panel(QWidget):
             self.idle();self.editor.flush()
             from .library import safe_name,write_json
             key='name' if column==0 else 'notes';value=safe_name(item.text(column)) if column==0 else item.text(column)
-            path=contained(self.library.root,Path(asset['_directory']).relative_to(self.library.root))/'asset.json'
-            data=read_json(path);data[key]=value;write_json(path,data)
-            asset[key]=value;self.restoring=True;item.setData(0,Qt.ItemDataRole.UserRole,asset);self.restoring=False
-            self.update_selection_controls(asset)
-            if self.editor.asset and self.editor.asset['id']==asset['id']:
-                self.editor.asset[key]=value;self.editor.update_heading()
+            versions=item.data(0,Qt.ItemDataRole.UserRole+1) if key=='name' else [asset]
+            if key=='name' and value!=asset['name']:
+                existing,_=self.library.list_assets(asset['character'],kind=asset['kind'])
+                if any(entry['name']==value for entry in existing):
+                    raise ValueError('已有同名资产。')
+            updates=[]
+            for version in versions:
+                path=contained(self.library.root,Path(version['_directory']).relative_to(self.library.root))/'asset.json'
+                updates.append((path,read_json(path)))
+            written=[]
+            try:
+                for path,original in updates:
+                    write_json(path,dict(original,**{key:value}))
+                    written.append((path,original))
+            except OSError:
+                for path,original in reversed(written):
+                    write_json(path,original)
+                raise
+            for version in versions:version[key]=value
+            self.restoring=True
+            try:
+                item.setData(0,Qt.ItemDataRole.UserRole,asset)
+                if key=='name':
+                    item.setData(0,Qt.ItemDataRole.UserRole+1,versions)
+                else:
+                    lineage=item.data(0,Qt.ItemDataRole.UserRole+1)
+                    lineage[0]=asset
+                    item.setData(0,Qt.ItemDataRole.UserRole+1,lineage)
+            finally:
+                self.restoring=False
+            if item==self.assets.currentItem():
+                self.load_asset_versions(item,self.selected_asset())
             self.set_status('资产信息已保存。')
         except Exception as exc:
             self.restoring=True;item.setText(column,asset['name' if column==0 else 'notes']);self.restoring=False
@@ -442,6 +610,9 @@ class Panel(QWidget):
         connected=self.connection_state=='Max 已连接'
         self.register_character.setEnabled(connected)
         self.capture_pose.setEnabled(connected and bool(self.active_character))
+        self.capture_tpose.setEnabled(connected and bool(self.active_character))
+        self.key_current.setEnabled(connected and bool(self.active_character))
+        self.key_tpose.setEnabled(connected and bool(self.active_character))
         self.capture_animation.setEnabled(connected and bool(self.active_character))
         pending=self.pending
         if not pending:return

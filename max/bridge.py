@@ -1,5 +1,6 @@
 """Max-side adapter. All scene operations run on Max's GUI thread."""
 import json
+import math
 import os
 from pathlib import Path
 import time
@@ -115,13 +116,36 @@ def rig_root(nodes, rig):
     return next(iter(roots.values()))
 
 
-def export_pose(nodes, destination, rig='Generic'):
-    data={'schema':1,'frame':float(rt.sliderTime),'rig':rig,'nodes':[],'signature':scene_signature(nodes)}
+def pose_records(nodes):
+    records=[]
     for node in nodes:
         parent=node.parent
         local=node.transform * rt.inverse(parent.transform) if parent else node.transform
-        data['nodes'].append({'name':str(node.name),'parent':str(parent.name) if parent else None,'local':rows(local),'tracks':capture_tracks(node)})
-    write_json(destination,data)
+        records.append({'name':str(node.name),'parent':str(parent.name) if parent else None,'local':rows(local),'tracks':capture_tracks(node)})
+    return records
+
+
+def export_pose(nodes,destination,rig='Generic'):
+    write_json(destination,dict(schema=1,frame=float(rt.sliderTime),rig=rig,nodes=pose_records(nodes),
+                                signature=scene_signature(nodes)))
+
+
+def export_animation_keys(nodes,folder,rig,start,end):
+    first=math.ceil(float(start))
+    last=math.floor(float(end))
+    if not nodes or last<first or (last-first+1)*len(nodes)>100000:
+        return '动画场景已保存；此次范围过大或为空，未生成可打键轨道。'
+    try:
+        signature=scene_signature(nodes)
+    except ValueError:
+        return '动画场景已保存；对象名称重复，未生成可打键轨道。'
+    frames=[]
+    for frame in range(first,last+1):
+        with pymxs.attime(frame):
+            frames.append(pose_records(nodes))
+    write_json(folder/'animation-keys.json',dict(schema=1,rig=rig,signature=signature,frames=frames))
+    return ''
+
 
 
 def capture_tracks(node):
@@ -161,8 +185,7 @@ def resolve_track(node,record):
     return sub
 
 
-def apply_pose(path, rig='Generic'):
-    data=json.loads(Path(path).read_text('utf-8'))
+def prepare_pose(data,rig):
     if data.get('schema')!=1 or not data.get('nodes'):raise ValueError('Invalid pose file')
     if data.get('rig','Generic')!=rig:raise ValueError('选择的骨骼类型与 Pose 不一致。')
     if data.get('signature'):validate_scene(list(rt.objects),data['signature'])
@@ -189,33 +212,65 @@ def apply_pose(path, rig='Generic'):
         if parent in records:add(parent)
         ordered.append(name)
     for name in records:add(name)
-    failure = None
-    with pymxs.undo(True,'LXMaxAnimation Pose'),pymxs.animate(True):
+    return scene,ordered
+
+
+def write_pose(scene,ordered,records,rig,frame,key):
+    for name in ordered:
+        node=scene[name][0]
+        local=matrix(records[name]['local'])
+        world=local * node.parent.transform if node.parent else local
+        if 'biped' in str(rt.classOf(node)).lower():
+            rt.biped.setTransform(node,rt.Name('rotation'),world.rotationPart,key)
+            rt.biped.setTransform(node,rt.Name('pos'),world.translationPart,key)
+        else:
+            node.transform=world
+            if key and rig!='CAT':rt.addNewKey(node.controller,frame)
+    for name in ordered:
+        for track in records[name].get('tracks',[]):
+            sub=resolve_track(scene[name][0],track)
+            sub.value=track['value']
+            if key:rt.addNewKey(sub.controller,frame)
+
+
+def apply_frames(data,frames,rig,key):
+    scene,ordered=prepare_pose(data,rig)
+    failure=None
+    with pymxs.undo(True,'LXMaxAnimation Keyframes' if key else 'LXMaxAnimation Pose'),pymxs.animate(key):
         try:
-            if rig=='CAT':
-                cat=rig_root([scene[name][0] for name in records],rig)
+            if key and rig=='CAT':
+                cat=rig_root([scene[name][0] for name in ordered],rig)
                 if int(cat.NumLayers)<1:cat.AppendLayer('LX Pose',rt.Name('Absolute'))
                 cat.CATMode=1
-            for name in ordered:
-                node=scene[name][0]; local=matrix(records[name]['local'])
-                world=local * node.parent.transform if node.parent else local
-                if 'biped' in str(rt.classOf(node)).lower():
-                    rt.biped.setTransform(node,rt.Name('rotation'),world.rotationPart,True)
-                    rt.biped.setTransform(node,rt.Name('pos'),world.translationPart,True)
-                else:
-                    node.transform=world
-                    if rig!='CAT':rt.addNewKey(node.controller,rt.sliderTime)
-            for name in ordered:
-                for track in records[name].get('tracks',[]):
-                    sub=resolve_track(scene[name][0],track);sub.value=track['value']
-                    rt.addNewKey(sub.controller,rt.sliderTime)
-        except BaseException as exc:
-            # Max undo rolls back but suppresses Python exceptions on exit.
-            failure = exc
+            for frame,values in frames:
+                records={record['name']:record for record in values}
+                if len(records)!=len(values) or set(records)!=set(ordered):
+                    raise ValueError('帧数据中的对象清单不一致。')
+                with pymxs.attime(frame):
+                    write_pose(scene,ordered,records,rig,frame,key)
+        except BaseException as error:
+            failure=error
             raise
     if failure is not None:
         raise failure
-    return {'ok':True,'message':f'Pose 已应用到当前帧：{len(ordered)} 个节点。'}
+
+
+def apply_pose(path,rig='Generic',key=True):
+    data=json.loads(Path(path).read_text('utf-8'))
+    apply_frames(data,[(float(rt.sliderTime),data.get('nodes',[]))],rig,key)
+    return {'ok':True,'message':'已打键到当前帧。' if key else '已读取 Pose。'}
+
+
+def apply_animation(path,rig,start,end):
+    data=json.loads(Path(path).read_text('utf8'))
+    frames=data.get('frames',[])
+    steps=len(frames)-1
+    start,end=float(start),float(end)
+    if not frames or not math.isfinite(start) or not math.isfinite(end) or end<start or (steps and end==start):
+        raise ValueError('请选择有效的目标帧段。')
+    targets=[(start+(end-start)*index/max(steps,1),values) for index,values in enumerate(frames)]
+    apply_frames(dict(data,nodes=frames[0]),targets,rig,True)
+    return {'ok':True,'message':f'已将动画打键到 {start:g}–{end:g} 帧。'}
 
 
 def param(export,name,value=None):
@@ -269,6 +324,12 @@ def export_character_scene(args):
     except ValueError:
         signature=None
         warnings.append('场景有重名对象，原生场景已完整保存。按对象匹配的 Pose 或动画操作需要唯一名称。')
+    rig=args.get('rig','Generic')
+    if signature and args['kind']=='model':
+        export_pose(nodes,folder/'tpose.json',rig)
+    if args['kind']=='animation':
+        warning=export_animation_keys(nodes,folder,rig,rt.animationRange.start,rt.animationRange.end)
+        if warning:warnings.append(warning)
     metadata=dict(rig=args.get('rig','Generic'),fps=int(rt.frameRate),start=float(rt.animationRange.start),
                   end=float(rt.animationRange.end),frame=float(rt.sliderTime),nodes=[str(n.name) for n in nodes],
                   signature=signature,scene=str(rt.maxFilePath)+str(rt.maxFileName),includeTextures=True,
@@ -368,6 +429,9 @@ def export_asset(args):
         if kind=='model':
             export_pose(nodes,folder/'tpose.json',rig)
             if rig=='CAT' and not root.SavePose(str(folder/'pose.pse')):raise RuntimeError('CAT T-pose 保存失败。')
+        if kind=='animation':
+            warning=export_animation_keys(nodes,folder,rig,args['start'],args['end'])
+            if warning:warnings.append(warning)
         if missing:warnings.append('以下贴图缺失，未复制：'+', '.join(missing))
         if not (folder/'asset.fbx').is_file() or (folder/'asset.fbx').stat().st_size==0:raise RuntimeError('FBX 导出未生成文件。')
         return {'ok':True,'main':'asset.fbx','warnings':warnings,'metadata':{'rig':rig,'fps':int(rt.frameRate),'start':args.get('start'),'end':args.get('end'),'nodes':[str(n.name) for n in nodes],'signature':scene_signature(nodes),'frame':float(old_time),'scene':str(rt.maxFilePath)+str(rt.maxFileName),'includeTextures':bool(args.get('includeTextures',False)),'warnings':warnings}}
@@ -377,10 +441,23 @@ def export_asset(args):
 
 
 def import_asset(args):
-    path=Path(args['path'])
     rig=args.get('rig','Generic')
+    operation=args.get('operation')
+    if operation=='keyCurrent':
+        nodes=list(rt.objects)
+        validate_scene(nodes,args['signature'])
+        data=dict(schema=1,rig=rig,signature=args['signature'],nodes=pose_records(nodes))
+        apply_frames(data,[(float(rt.sliderTime),data['nodes'])],rig,True)
+        return {'ok':True,'message':'已为当前姿势打键。'}
+    path=Path(args['path'])
     if not path.is_file():raise ValueError('资产文件不存在。')
-    if args['kind']=='pose':return apply_pose(path,rig)
+    if operation=='keyAnimation':
+        return apply_animation(path.parent/'animation-keys.json',rig,args['start'],args['end'])
+    if operation=='keyTpose':
+        tpose=path.parent/'tpose.json'
+        if not tpose.is_file():raise ValueError('此版本没有可打键的 T-pose，请打开场景后重新保存 T-pose。')
+        return apply_pose(tpose,rig)
+    if args['kind']=='pose':return apply_pose(path,rig,args.get('key',True))
     source=path if path.suffix.lower()=='.max' else path.parent/'source.max'
     if args['kind'] in ('animation','model') and source.is_file():
         # Open a working copy so Ctrl+S cannot overwrite an immutable library revision.
@@ -437,7 +514,7 @@ class Bridge:
         if self.busy:return
         self.busy=True
         try:
-            write_json(self.root/'info.json',{'protocol':2,'fullCharacterScene':1,'pid':os.getpid(),'birth':self.birth,'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0]),'frame':float(rt.sliderTime),'start':float(rt.animationRange.start),'end':float(rt.animationRange.end),'fps':int(rt.frameRate),'selection':[str(n.name) for n in rt.selection]})
+            write_json(self.root/'info.json',{'protocol':2,'fullCharacterScene':1,'keyAssetOperations':1,'pid':os.getpid(),'birth':self.birth,'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0]),'frame':float(rt.sliderTime),'start':float(rt.animationRange.start),'end':float(rt.animationRange.end),'fps':int(rt.frameRate),'selection':[str(n.name) for n in rt.selection]})
             for path in self.root.glob('*.request.json'):
                 working=path.with_suffix('.working');path.rename(working)
                 try:
@@ -445,7 +522,7 @@ class Bridge:
                     if data['expires']<time.time():raise ValueError('请求已过期，未执行。')
                     action=data['action']
                     if action=='export':result=export_asset(data['args'])
-                    elif action=='import':result=import_asset(data['args'])
+                    elif action in ('import','keyAsset'):result=import_asset(data['args'])
                     else:raise ValueError('Unknown action')
                 except Exception as exc:result={'ok':False,'message':str(exc)}
                 write_json(path.with_name(path.name.replace('.request.json','.result.json')),result)

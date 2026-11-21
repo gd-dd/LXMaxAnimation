@@ -11,8 +11,8 @@ from types import SimpleNamespace
 class PoseFailureTests(unittest.TestCase):
     def run_pose(self, fail):
         source = Path(__file__).resolve().parents[1] / 'max/bridge.py'
-        function = next(n for n in ast.parse(source.read_text('utf-8')).body
-                        if isinstance(n, ast.FunctionDef) and n.name == 'apply_pose')
+        functions = [n for n in ast.parse(source.read_text('utf-8')).body
+                     if isinstance(n, ast.FunctionDef) and n.name in {'apply_pose','apply_frames','prepare_pose','write_pose'}]
         nodes = [SimpleNamespace(name=name, parent=None, controller=object(), transform=0)
                  for name in ('root', 'control')]
         events = []
@@ -38,8 +38,8 @@ class PoseFailureTests(unittest.TestCase):
                    rt=SimpleNamespace(objects=nodes, classOf=lambda n: 'Dummy',
                                       isProperty=lambda *a: False, sliderTime=7,
                                       addNewKey=lambda *a: None),
-                   pymxs=SimpleNamespace(undo=lambda *a: MaxUndo(), animate=lambda *a: nullcontext()))
-        exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), 'exec'), env)
+                   pymxs=SimpleNamespace(undo=lambda *a: MaxUndo(), animate=lambda *a: nullcontext(), attime=lambda *a: nullcontext()))
+        exec(compile(ast.Module(body=functions, type_ignores=[]), str(source), 'exec'), env)
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'pose.json'
             path.write_text(json.dumps({'schema': 1, 'nodes': [

@@ -115,6 +115,16 @@ try:
     assert leaf.is_file() and leaf.is_relative_to(Path(os.environ['LOCALAPPDATA'])),leaf
     tpose=output/'native-tpose';tpose.mkdir()
     assert bridge['export_asset']({'kind':'model','fullCharacterScene':True,'directory':str(tpose)})['main']=='source.max'
+    key_control=rt.getNodeByName('RoleControl')
+    keys=rt.getPropertyController(key_control,'finger')
+    assert rt.getKeyIndex(keys,30)==0 and rt.getKeyIndex(keys,50)==0
+    bridge['import_asset'](dict(operation='keyAnimation',path=str(scene/'source.max'),rig='Generic',start=30,end=50))
+    assert rt.getKeyIndex(keys,30)>0 and rt.getKeyIndex(keys,50)>0
+    with pymxs.attime(30):assert abs(float(key_control.finger)-0)<0.01
+    with pymxs.attime(50):assert abs(float(key_control.finger)-100)<0.01
+    assert rt.getKeyIndex(keys,2)>0 and rt.getKeyIndex(keys,12)>0
+    assert rt.getNodeByName('UnselectedCamera') is not None
+    report['keyedAnimation']='Written to frames 30-50 with source keys preserved and scene unchanged'
     report['nativeRole']='Full scene and copied material bitmap reopen with original bitmap unavailable'
     report.update(ok=True,animation=result,integrity='extra/missing rejected without output',isolation='Max save changes working scene only')
 except Exception:report['error']=traceback.format_exc()

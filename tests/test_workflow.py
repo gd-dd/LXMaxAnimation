@@ -53,6 +53,18 @@ class WorkflowTests(unittest.TestCase):
         self.library.update_character_info('Hero',category='主角')
         self.assertEqual(self.library.categories(),['主角'])
         self.assertEqual(self.library.character_info('Hero')['category'],'主角')
+    def test_delete_animation_revision_then_all_remaining_versions(self):
+        first=self.animation()
+        second=self.animation()
+        third=self.animation()
+        different=self.library.publish('Hero','Run','animation',self.source,'asset.fbx',metadata=self.metadata)
+        self.assertEqual(self.library.delete_animation(second),1)
+        self.assertEqual({a['id'] for a in self.library.list_assets('Hero',kind='animation')[0]},
+                         {first['id'],third['id'],different['id']})
+        self.assertEqual(self.library.delete_animation(third,all_versions=True),2)
+        self.assertEqual([a['id'] for a in self.library.list_assets('Hero',kind='animation')[0]],[different['id']])
+        self.assertEqual(len(list((self.library.root/'.staging/deleted-animations').glob('*/*/asset.json'))),3)
+
     def test_clip_independence_and_version_binding(self):
         asset=self.animation();data=clips.document(asset);second=clips.new_clip('Run',20,40);data['clips'].append(second)
         data['clips'][0]['settings']['loopTime']=True

@@ -3,7 +3,7 @@
   "kind": "lx-tool",
   "name": "LXMaxAnimation",
   "description": "连接 Max，以 T-pose 管理角色、完整动画场景和 Pose，编辑独立 Clip 配置。",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "category": "动画管线",
   "icon": ".lxtool/icon.png",
   "readme": ".lxtool/README.md",
@@ -12,13 +12,13 @@
   "actions": {},
   "files": {
     ".lxtool/icon.png": "7a100cb728acb642ab228373a4bff7475b3704aafbcad7863531322217bebfd2",
-    ".lxtool/README.md": "69465b6bede3b03a14e50e45c74dcb3b0b613188bdda45540d0b6ec0b9db6e45",
+    ".lxtool/README.md": "b9e2bc82cf07f2ddd85255372522c67348c18068dc63f65d3fb50d7d26d7a7ae",
     ".lxtool/panel.json": "8dbce71d0ca9feb12cbf3d05b82693b3f8c7254a05f0ed91a305a8c0fb31cdd2",
     "ui/__init__.py": "832ba713741f115fd0f348ffeb5a036e7530f4a6702e2dd341b135f0d17c6b5a",
     "ui/max_connection.py": "127487795232286b023aaaae265af9277f2cf024af92cb2c2ca15c24c485e4dd",
-    "ui/library.py": "dbc5ed5aebfe4d999f84d07b97567300f0ec3584182aa6df0a56d2dbc26777cb",
+    "ui/library.py": "db0693fa8d13bbb813336e4c15077c2f408e254550805b9eb6ccef6dabd31d60",
     "ui/integrations.py": "99fe30489409ec23f00e378d28b937a1e0c0a0a41e3d48e79173e652b70573d5",
-    "ui/panel.py": "86002a466f28d30e6b8bf736e70aac81d74e506d46a67aaa2961297c7e70a0fa",
+    "ui/panel.py": "287272de9923e16aff76ba7882c73a64e15554e94b9cf4997cac5ec5c930df85",
     "ui/clips.py": "834a201ffb12269e18600b2a81b9eb445317aaa4575a4895ab309e0e183cfebf",
     "ui/clip_editor.py": "0e24dd69e4ec73c1e2ac0f53d214cfd95cc736cd5b3f97ec47ad2f888628e060",
     "ui/dialogs.py": "87548b1375c53e0b33a3eed972b3a8f9d0828831ff69fcc34979dceb494cfbda",
@@ -28,8 +28,8 @@
     "ui/icons/chevron-down.svg": "5a754cf77e5b0e936a71a9300ffcab6d97e405ecb6bc06fa169c26b234511e0b",
     "ui/icons/chevron-up.svg": "c6f9c0ce9ab58e0acbf8ca9dcced8ded341ce07d92d07c545f7915b0e8de2a7e",
     "max/bootstrap.ms": "4d571cdb39f236f9fe460213246d7b962948c9efe9eebe7792ca4a43aa3f6a53",
-    "max/bridge.py": "160fc883927114339d0df18bbf858aa6c8e480e175e9434afb012c21435ae2e4"
+    "max/bridge.py": "f8cb30d056df41c395314a496ae3f253f4ef91cbfef96bf4d0755068648ee93f"
   },
-  "releaseNotes": "首次登记角色可直接保存动画，之后可补存 T-pose。角色和 T-pose 以原生 MAX 文件保存整个场景，包括未选中对象及材质，归档 Max 能解析的位图贴图。角色库新增可恢复删除，角色及历史移入库内回收目录。保存新版角色场景前，已连接旧桥的 Max 需运行一次新版连接脚本。",
+  "releaseNotes": "重排角色资产操作，区分保存、打开场景、读取姿势和打键。动画可在当前场景写入指定目标帧段；没有轨道的旧版本可打开后另存。每条资产默认最新版本，历史版本用下拉框切换。删除可针对所选动画版本或所有同名版本，归档到回收目录。已连接旧版桥的 Max 需运行一次新版连接脚本。",
   "publishedAt": "2026-11-01"
 }

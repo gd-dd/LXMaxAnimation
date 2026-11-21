@@ -85,7 +85,7 @@ with tempfile.TemporaryDirectory() as temp:
     # Inline metadata editing persists; double-click cancels delayed editing and only loads.
     asset_item=panel.assets.currentItem();asset_item.setText(3,'新的备注')
     assert library.list_assets('测试角色','新的备注')[0][0]['id']==animation['id']
-    loaded=[];panel.send_to_max=lambda asset:loaded.append(asset['id'])
+    loaded=[];panel.send_to_max=lambda asset,**options:loaded.append(asset['id'])
     rect=panel.assets.visualItemRect(asset_item);point=QPoint(rect.left()+20,rect.center().y())
     QTest.mouseClick(panel.assets.viewport(),Qt.MouseButton.LeftButton,pos=point)
     QTest.qWait(QApplication.doubleClickInterval()+150)
@@ -96,6 +96,13 @@ with tempfile.TemporaryDirectory() as temp:
     QTest.mouseDClick(panel.assets.viewport(),Qt.MouseButton.LeftButton,pos=point)
     QTest.qWait(QApplication.doubleClickInterval()+150)
     assert loaded==[animation['id']]
+    second=library.publish(animation['character'],'Walk_Run','animation',source,'asset.fbx',metadata=metadata)
+    panel.assets.setCurrentItem(None);panel.refresh_assets(select_id=second['id'])
+    assert panel.assets.topLevelItemCount()==3 and panel.version_choice.count()==2
+    assert panel.selected_asset()['id']==second['id'] and panel.version_choice.currentIndex()==0
+    panel.version_choice.setCurrentIndex(1)
+    assert panel.selected_asset()['id']==animation['id']
+    asset_item=panel.assets.currentItem()
     panel.assets.clearSelection();panel.assets.setCurrentItem(None);app.processEvents();assert not panel.editor.isEnabled()
     panel.grab().save(str(output/'panel-empty.png'))
     panel.assets.setCurrentItem(asset_item);app.processEvents();assert panel.editor.isEnabled()

@@ -95,6 +95,39 @@ class Library:
         source.rename(target)
         return target
 
+    def delete_animation(self, asset, all_versions=False):
+        if asset.get('kind')!='animation':
+            raise ValueError('请先选择动画。')
+        character=safe_name(asset['character'])
+        assets,errors=self.list_assets(character,kind='animation')
+        if errors:
+            raise ValueError('动画索引存在异常，请先修复后再删除。')
+        current=next((item for item in assets if item['id']==asset['id']),None)
+        if current is None:
+            raise ValueError('所选动画版本已不存在。')
+        selected=[item for item in assets if item['name']==current['name']] if all_versions else [current]
+        archive=self.root/'.staging'/'deleted-animations'
+        if archive.resolve()!=archive:
+            raise ValueError('动画回收目录路径无效。')
+        sources=[Path(item['_directory']) for item in selected]
+        expected=self.root/'characters'/character/'animation'
+        if any(path.resolve()!=path or path.parent!=expected for path in sources):
+            raise ValueError('动画版本目录路径无效。')
+        batch=archive/(uuid.uuid4().hex+'-'+character)
+        batch.mkdir(parents=True)
+        moved=[]
+        try:
+            for source in sources:
+                target=batch/source.name
+                source.rename(target)
+                moved.append((source,target))
+        except OSError:
+            for source,target in reversed(moved):
+                target.rename(source)
+            batch.rmdir()
+            raise
+        return len(moved)
+
     def list_assets(self, character=None, query='', kind=None):
         result, errors = [], []
         for name in ([safe_name(character)] if character else self.characters()):
@@ -186,7 +219,8 @@ class Library:
         info['reference'] = current
         if not current and info.get('sceneAssetId'):
             animations, _ = self.list_assets(name,kind='animation')
-            info['reference'] = next((a for a in animations if a['id']==info['sceneAssetId']),None)
+            info['reference'] = next((a for a in animations if a['id']==info['sceneAssetId']),
+                                     next((a for a in animations if a.get('metadata',{}).get('fullCharacterScene')),None))
         return info
 
     def categories(self):
