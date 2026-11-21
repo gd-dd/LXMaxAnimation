@@ -152,24 +152,26 @@ class Library:
         source.rename(target)
         return target
 
-    def delete_animation(self, asset, all_versions=False):
-        if asset.get('kind')!='animation':
-            raise ValueError('请先选择动画。')
+    def delete_asset(self, asset, all_versions=False):
+        kind=asset.get('kind')
+        if kind not in KINDS:
+            raise ValueError('请先选择资产。')
         character=safe_name(asset['character'])
-        assets,errors=self.list_assets(character,kind='animation')
+        assets,errors=self.list_assets(character,kind=kind)
         if errors:
-            raise ValueError('动画索引存在异常，请先修复后再删除。')
+            raise ValueError('资产索引存在异常，请先修复后再删除。')
         current=next((item for item in assets if item['id']==asset['id']),None)
         if current is None:
-            raise ValueError('所选动画版本已不存在。')
+            raise ValueError('所选资产版本已不存在。')
         selected=[item for item in assets if item['name']==current['name']] if all_versions else [current]
-        archive=self.root/'.staging'/'deleted-animations'
+        staging=self.root/'.staging'
+        archive=staging/'deleted-animations' if kind=='animation' else staging/'deleted-assets'/kind
         if archive.resolve()!=archive:
-            raise ValueError('动画回收目录路径无效。')
+            raise ValueError('资产回收目录路径无效。')
         sources=[Path(item['_directory']) for item in selected]
-        expected=self.root/'characters'/character/'animation'
+        expected=self.root/'characters'/character/kind
         if any(path.resolve()!=path or path.parent!=expected for path in sources):
-            raise ValueError('动画版本目录路径无效。')
+            raise ValueError('资产版本目录路径无效。')
         batch=archive/(uuid.uuid4().hex+'-'+character)
         batch.mkdir(parents=True)
         moved=[]

@@ -122,12 +122,19 @@ class ClipEditor(QWidget):
         if self.asset:self.clip_selection[self.asset['id']]=self.current_id
         self.library,self.asset=library,asset;self.current_id=None;self.data=None
         self.loading=True;self.table.clear();self.loading=False
-        active=bool(asset and asset['kind']=='animation' and not asset.get('placeholder'));self.setEnabled(active)
+        error=''
+        if asset and asset['kind']=='animation' and not asset.get('placeholder'):
+            try:
+                self.data=clips.load(library,asset)
+            except (OSError,ValueError) as exc:
+                error=str(exc)
+        active=self.data is not None
+        self.setEnabled(active)
         self.setProperty('empty',not active);self.style().unpolish(self);self.style().polish(self)
         if not active:
-            self.title.setText('Clip 拆分');self.source.setText('选择左侧动画，开始拆分和配置。')
+            self.title.setText('Clip 拆分')
+            self.source.setText(error or '选择左侧动画，开始拆分和配置。')
             self.clip_settings.set_values(clips.defaults());self.importer.set_values(clips.fbx_defaults());return
-        self.data=clips.load(library,asset)
         self.preset.clear();self.preset.addItems(clips.presets(library))
         self.title.setText('Clip 拆分')
         source=self.data['source'];self.source.setText(f"{source['firstFrame']:g} — {source['lastFrame']:g} 帧 · {source['fps']:g} FPS · 双击单元格编辑")

@@ -58,12 +58,29 @@ class WorkflowTests(unittest.TestCase):
         second=self.animation()
         third=self.animation()
         different=self.library.publish('Hero','Run','animation',self.source,'asset.fbx',metadata=self.metadata)
-        self.assertEqual(self.library.delete_animation(second),1)
+        self.assertEqual(self.library.delete_asset(second),1)
         self.assertEqual({a['id'] for a in self.library.list_assets('Hero',kind='animation')[0]},
                          {first['id'],third['id'],different['id']})
-        self.assertEqual(self.library.delete_animation(third,all_versions=True),2)
+        self.assertEqual(self.library.delete_asset(third,all_versions=True),2)
         self.assertEqual([a['id'] for a in self.library.list_assets('Hero',kind='animation')[0]],[different['id']])
         self.assertEqual(len(list((self.library.root/'.staging/deleted-animations').glob('*/*/asset.json'))),3)
+
+    def test_delete_pose_versions_and_empty_assets_without_clips(self):
+        write_json(self.source/'pose.json',{'schema':1})
+        pose=self.library.publish('Hero','TPose','pose',self.source,'pose.json')
+        older_pose=self.library.publish('Hero','TPose','pose',self.source,'pose.json')
+        same_name=self.library.create_asset('Hero','TPose','animation')
+        empty_tpose=self.library.create_asset('Hero','待制作','model')
+        self.assertEqual(self.library.delete_asset(pose),1)
+        self.assertEqual(self.library.delete_asset(older_pose,all_versions=True),1)
+        self.assertEqual(self.library.delete_asset(empty_tpose),1)
+        self.assertEqual({a['id'] for a in self.library.list_assets('Hero')[0]},
+                         {self.character['id'],same_name['id']})
+        archived=self.library.root/'.staging/deleted-assets'
+        self.assertEqual(len(list((archived/'pose').glob('*/*/pose.json'))),2)
+        self.assertEqual(len(list((archived/'model').glob('*/*/asset.json'))),1)
+        self.assertEqual(self.library.delete_asset(self.character),1)
+        self.assertIsNone(self.library.character_info('Hero')['reference'])
 
     def test_clip_independence_and_version_binding(self):
         asset=self.animation();data=clips.document(asset);second=clips.new_clip('Run',20,40);data['clips'].append(second)

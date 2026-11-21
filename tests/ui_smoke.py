@@ -118,7 +118,7 @@ with tempfile.TemporaryDirectory() as temp:
         panel.start_max();panel.start_max()
         assert picker.call_count==1 and launch.call_count==1
         assert panel.settings['maxExecutable']==str(fake_exe)
-        ready={'protocol':2,'directory':'test-session','pid':87654}
+        ready={'protocol':2,'assetWorkspace':1,'directory':'test-session','pid':87654}
         with patch('ui.panel.host.sessions',return_value=[dict(ready,pid=12345)]):
             panel.poll();assert panel.active_session is None
         with patch('ui.panel.host.sessions',return_value=[ready]):
@@ -160,5 +160,26 @@ with tempfile.TemporaryDirectory() as temp:
     panel.refresh_assets(select_id=saved['id'])
     assert panel.version_choice.count()==1
     assert panel.apply_button.isEnabled() and panel.key_asset.isEnabled()
+    write_json(source/'pose.json',{'schema':1})
+    old_pose=library.publish('新角色','TPose','pose',source,'pose.json',metadata={'frame':0})
+    new_pose=library.publish('新角色','TPose','pose',source,'pose.json',metadata={'frame':0})
+    panel.refresh_assets(select_id=new_pose['id'],flush=False)
+    menu=panel.delete_asset_button.menu()
+    assert not panel.editor.isEnabled() and panel.delete_asset_button.isEnabled()
+    with patch('ui.panel.QMessageBox.question',return_value=QMessageBox.StandardButton.No):
+        menu.actions()[0].trigger()
+    assert panel.selected_asset()['id']==new_pose['id']
+    with patch('ui.panel.QMessageBox.question',return_value=QMessageBox.StandardButton.Yes):
+        menu.actions()[0].trigger()
+        assert panel.selected_asset()['id']==old_pose['id']
+        menu.actions()[1].trigger()
+        assert not panel.delete_asset_button.isEnabled()
+        old_animation=library.publish('新角色','旧动画','animation',source,'asset.fbx')
+        panel.refresh_assets(select_id=old_animation['id'],flush=False)
+        assert not panel.editor.isEnabled() and panel.delete_asset_button.isEnabled()
+        menu.actions()[0].trigger()
+    archived=library.root/'.staging/deleted-animations'
+    assert len(list(archived.glob('*/*/asset.json')))==1 and not list(archived.glob('*/*/clips.json'))
+    assert [entry['id'] for entry in library.list_assets('新角色')[0]]==[saved['id']]
     panel.shutdown();panel.shutdown();shell.close()
 print('UI passed: embedded widget, sorting/search, role category gallery, independent clip settings, validation and persistence')

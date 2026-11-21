@@ -469,7 +469,7 @@ def import_asset(args):
     source=path if path.suffix.lower()=='.max' else path.parent/'source.max'
     if (args['kind'] in ('animation','model') or operation=='coverScene') and source.is_file():
         # Open a working copy so Ctrl+S cannot overwrite an immutable library revision.
-        working_root=Path(os.environ['LOCALAPPDATA'])/'LXMaxAnimation/working-scenes';working_root.mkdir(parents=True,exist_ok=True)
+        working_root=local_data()/'LXMaxAnimation/working-scenes';working_root.mkdir(parents=True,exist_ok=True)
         working=working_root/(uuid.uuid4().hex+'.max');shutil.copy2(source,working)
         textures=path.parent/'textures.json'
         mapping={};asset_paths={}
@@ -519,10 +519,26 @@ def execute_request(action,args):
     raise ValueError('Unknown action')
 
 
+def local_data():
+    try:
+        shared=rt.LXMaxAutoConnectRoot
+    except AttributeError:
+        shared=None
+    if isinstance(shared,str) and Path(shared).is_absolute():
+        return Path(shared).parent
+    return Path(os.environ['LOCALAPPDATA'])
+
+
 class Bridge:
-    def __init__(self):
-        self.root=Path(os.environ['LOCALAPPDATA'])/'LXMaxAnimation/sessions'/(str(os.getpid())+'-'+uuid.uuid4().hex[:8])
-        self.root.mkdir(parents=True)
+    def __init__(self, previous=None):
+        sessions=local_data()/'LXMaxAnimation/sessions'
+        self.root=(previous.root if previous is not None and previous.root.parent==sessions
+                   else sessions/(str(os.getpid())+'-'+uuid.uuid4().hex[:8]))
+        self.root.mkdir(parents=True,exist_ok=True)
+        source=Path(__file__).resolve()
+        self.package=str(source.parents[1])
+        self.digest=hashlib.sha256(source.read_bytes()).hexdigest()
+
         import ctypes
         from ctypes import wintypes as W
         kernel=ctypes.WinDLL('kernel32')
@@ -532,15 +548,18 @@ class Bridge:
         if not kernel.GetProcessTimes(kernel.GetCurrentProcess(),ctypes.byref(created),ctypes.byref(exited),ctypes.byref(cpu),ctypes.byref(user)):raise RuntimeError('Cannot read Max process identity')
         self.birth=str((created.dwHighDateTime<<32)|created.dwLowDateTime)
         self.busy=False
-        self.timer=QTimer();self.timer.setInterval(750);self.timer.timeout.connect(self.tick);self.timer.start()
+        self.timer=QTimer();self.timer.setInterval(750);self.timer.timeout.connect(self.tick)
+    def start(self):
         self.tick()
+        self.timer.start()
     def stop(self):
         self.timer.stop();(self.root/'info.json').unlink(missing_ok=True)
     def tick(self):
         if self.busy:return
         self.busy=True
+        rt.LXMaxAnimationCanReload=False
         try:
-            write_json(self.root/'info.json',{'protocol':2,'fullCharacterScene':1,'keyAssetOperations':1,'assetWorkspace':1,'pid':os.getpid(),'birth':self.birth,'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0]),'frame':float(rt.sliderTime),'start':float(rt.animationRange.start),'end':float(rt.animationRange.end),'fps':int(rt.frameRate),'selection':[str(n.name) for n in rt.selection]})
+            write_json(self.root/'info.json',{'protocol':2,'fullCharacterScene':1,'keyAssetOperations':1,'assetWorkspace':1,'package':self.package,'bridgeDigest':self.digest,'pid':os.getpid(),'birth':self.birth,'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0]),'frame':float(rt.sliderTime),'start':float(rt.animationRange.start),'end':float(rt.animationRange.end),'fps':int(rt.frameRate),'selection':[str(n.name) for n in rt.selection]})
             for path in self.root.glob('*.request.json'):
                 working=path.with_suffix('.working');path.rename(working)
                 try:
@@ -550,9 +569,24 @@ class Bridge:
                 except Exception as exc:result={'ok':False,'message':str(exc)}
                 write_json(path.with_name(path.name.replace('.request.json','.result.json')),result)
                 working.unlink()
-        finally:self.busy=False
+        finally:
+            self.busy=False
+            rt.LXMaxAnimationCanReload=not any(self.root.glob('*.request.json'))
 
 
-if hasattr(builtins,'_lx_animation_bridge'):builtins._lx_animation_bridge.stop()
-builtins._lx_animation_bridge=Bridge()
+rt.execute('global LXMaxAnimationCanReload; global LXMaxAnimationBootstrapDigest')
+previous=getattr(builtins,'_lx_animation_bridge',None)
+replacement=Bridge(previous)
+if previous is not None:
+    previous.stop()
+try:
+    replacement.start()
+except Exception:
+    replacement.stop()
+    if previous is not None:
+        previous.timer.start()
+        previous.tick()
+    raise
+builtins._lx_animation_bridge=replacement
+rt.LXMaxAnimationBootstrapDigest=replacement.digest
 print('LXMaxAnimation connected. PID',os.getpid())

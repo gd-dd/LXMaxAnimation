@@ -25,7 +25,18 @@ class Job(QThread):
 
 class Panel(QWidget):
     def __init__(self,context,parent=None):
-        super().__init__(parent);self.context=context;max_connection.refresh_install('max-animation',context.resource('max/bootstrap.ms'));self.settings=context.load_settings()
+        super().__init__(parent)
+        self.context=context
+        self.settings=context.load_settings()
+        self.registration_error=''
+        self.attach=None
+        try:
+            if QApplication.platformName()!='offscreen':
+                self.attach=max_connection.AutoAttach('max-animation',context)
+            max_connection.register('max-animation',context)
+        except (OSError,ValueError) as error:
+            self.registration_error=str(error)
+        self.waiting_target=None
         self.library=None;self.active_character=None;self.active_session=self.settings.get('session');self.pending=None;self.launching=None
         self.jobs=[];self.closed=False;self.gallery=None;self.restoring=False
         self.setObjectName('LXAnimation')
@@ -86,7 +97,7 @@ class Panel(QWidget):
         self.connect_button=self.button('连接 Max',self.start_max);row.addWidget(self.connect_button)
         more=QToolButton();more.setText('更多');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
         menu.addAction('资产库 / 同步',lambda:self.guard(self.library_settings));menu.addSeparator()
-        for title,fn in [('安装自动连接组件',self.install_connection),('连接帮助',self.connection_help),('切换 Max 窗口',self.connect_max),('断开连接',self.disconnect),('更换 Max 程序',self.choose_max_program)]:menu.addAction(title,lambda fn=fn:self.guard(fn))
+        for title,fn in [('切换 Max 窗口',self.connect_max),('断开连接',self.disconnect),('更换 Max 程序',self.choose_max_program)]:menu.addAction(title,lambda fn=fn:self.guard(fn))
         more.setMenu(menu);row.addWidget(more);outer.addLayout(row)
         connection_row=QHBoxLayout()
         self.connection=ElidedLabel('尚未连接 Max')
@@ -140,14 +151,14 @@ class Panel(QWidget):
             row.addWidget(button,1)
         self.save_button.setStyleSheet("QPushButton:enabled {background:#dcebc9;border-color:#b8cba0;font-weight:600;}")
         rightbox.addLayout(row)
-        self.delete_animation_button=QToolButton()
-        self.delete_animation_button.setText('删除动画…')
-        self.delete_animation_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        delete_menu=QMenu(self.delete_animation_button)
-        delete_menu.addAction('删除所选版本',lambda:self.guard(lambda:self.delete_animation(False)))
-        delete_menu.addAction('删除整条动画',lambda:self.guard(lambda:self.delete_animation(True)))
-        self.delete_animation_button.setMenu(delete_menu)
-        management.addWidget(self.delete_animation_button)
+        self.delete_asset_button=QToolButton()
+        self.delete_asset_button.setText('删除资产…')
+        self.delete_asset_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        delete_menu=QMenu(self.delete_asset_button)
+        delete_menu.addAction('删除所选版本',lambda:self.guard(lambda:self.delete_asset(False)))
+        delete_menu.addAction('删除全部版本',lambda:self.guard(lambda:self.delete_asset(True)))
+        self.delete_asset_button.setMenu(delete_menu)
+        management.addWidget(self.delete_asset_button)
         self.editor=ClipEditor();self.editor.message.connect(self.set_status);rightbox.addWidget(self.editor,1)
         self.split.addWidget(right);self.split.setSizes([300,700]);self.split.setStretchFactor(0,1);self.split.setStretchFactor(1,2);self.split.setChildrenCollapsible(False)
         self.status=ElidedLabel('先创建角色和资产，再连接 Max 保存修改。');outer.addWidget(self.status)
@@ -161,6 +172,7 @@ class Panel(QWidget):
         self.guard(lambda:self.load_library(path))
         self.active_session=self.settings.get('session')
         self.auto_reconnect=True
+        if self.registration_error:self.set_status('Max 启动接入设置未能写入：'+self.registration_error)
         self.timer=QTimer(self);self.timer.setInterval(750);self.timer.timeout.connect(self.poll);self.timer.start();self.poll();self.update_workspace()
 
     def minimumSizeHint(self):return QSize(360,300)
@@ -204,7 +216,7 @@ class Panel(QWidget):
     def selected_session(self):
         matches=[s for s in host.sessions() if s['directory']==self.active_session]
         if not matches:raise ValueError('请连接一个 Max 窗口。')
-        if matches[0].get('protocol',1)<2:raise ValueError('Max 连接脚本需要更新，请重新运行本工具的连接脚本。')
+        if matches[0].get('assetWorkspace')!=1:raise ValueError('Max 正在等待自动连接。')
         return matches[0]
     def character_info(self):
         self.require_library()
@@ -329,30 +341,40 @@ class Panel(QWidget):
         self.editor.set_asset(self.library,asset)
         self.update_selection_controls(asset)
 
-    def install_connection(self):
-        folder=max_connection.install('max-animation',self.context.resource('max/bootstrap.ms'))
-        QMessageBox.information(self,'自动连接已安装','以后启动 Max 自动连接；当前窗口请通过“连接帮助”运行一次脚本，无需关闭场景。\n'+str(folder))
+    def select_max(self,window):
+        live=max_connection.process_identity(window['pid'])
+        if not live or live['birth']!=window['birth']:
+            raise ValueError('该 Max 已退出，请重新选择。')
+        self.waiting_target=(window['pid'],str(window['birth']))
+        self.remember_max_target(window)
+        self.active_session=None
+        self.auto_reconnect=True
+        self.persist()
+        self.poll()
 
     def connect_max(self):
-        self.idle();available=host.available_windows()
+        self.idle()
+        available=host.available_windows()
         if not available:self.start_max();return
-        dialog=QDialog(self);dialog.setWindowTitle('选择 Max 窗口');layout=QVBoxLayout(dialog);combo=QComboBox()
+        if len(available)==1:self.select_max(available[0]);return
+        dialog=QDialog(self);dialog.setWindowTitle('选择 Max 窗口')
+        layout=QVBoxLayout(dialog);combo=QComboBox()
         for window in available:
-            status='已连接' if window['session'] else '尚未连接'
+            status='已连接' if window['session'] and window['session'].get('assetWorkspace')==1 else '等待自动连接'
             combo.addItem(f"PID {window['pid']} · {window['title']} · {status}",window)
-        layout.addWidget(combo);buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel);buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);layout.addWidget(buttons)
-        if not dialog.exec():return
-        selected=combo.currentData()
-        live=max_connection.process_identity(selected['pid'])
-        if not live or live['birth']!=selected['birth']:raise ValueError('该 Max 已退出，请重新选择。')
-        if not selected['session']:
-            self.connection_help();return
-        self.remember_max_target(selected['session']);self.active_session=selected['session']['directory'];self.auto_reconnect=False;self.persist();self.poll()
-    def disconnect(self):self.idle();self.active_session=None;self.auto_reconnect=False;self.persist();self.poll()
-    def connection_help(self):
-        script=self.context.resource('max/bootstrap.ms')
-        QApplication.clipboard().setText(str(script))
-        QMessageBox.information(self,'连接 Max',f'在需要连接的 Max 窗口中，通过 Scripting → Run Script 运行：\n\n{script}\n\n随后点击“连接 Max”选择该窗口。一次只绑定一个窗口。')
+        layout.addWidget(combo)
+        buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);layout.addWidget(buttons)
+        if dialog.exec():self.select_max(combo.currentData())
+
+    def disconnect(self):
+        self.idle()
+        self.active_session=None
+        self.waiting_target=None
+        self.auto_reconnect=False
+        self.persist()
+        self.poll()
+
     def create_asset(self,new_character=False):
         self.idle()
         library=self.require_library()
@@ -381,7 +403,7 @@ class Panel(QWidget):
         self.editor.flush()
         session=self.selected_session()
         if session.get('assetWorkspace')!=1:
-            raise ValueError('请在目标 Max 中运行新版连接脚本。')
+            raise ValueError('正在等待 Max 自动升级连接。')
         editing=self.bound_asset(session)
         dialog=QDialog(self)
         dialog.setWindowTitle('保存修改')
@@ -439,19 +461,20 @@ class Panel(QWidget):
         self.editing_label.setText('当前编辑：'+asset['character']+' / '+asset['name'])
         self.persist()
 
-    def delete_animation(self,all_versions):
+    def delete_asset(self,all_versions):
         self.idle()
         asset=self.selected_asset()
-        if asset['kind']!='animation':raise ValueError('请选择动画。')
         subject='全部版本' if all_versions else f"版本 v{asset['_displayVersion']:03d}"
-        if QMessageBox.question(self,'删除动画',f'将「{asset["name"]}」的{subject}移入回收目录？')!=QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(self,'删除资产',f'将「{asset["name"]}」的{subject}移入回收目录？')!=QMessageBox.StandardButton.Yes:
             return
-        self.editor.flush()
-        count=self.library.delete_animation(asset,all_versions)
+        versions=self.assets.currentItem().data(0,Qt.ItemDataRole.UserRole+1)
+        next_id=None if all_versions else next((entry['id'] for entry in versions if entry['id']!=asset['id']),None)
+        count=self.library.delete_asset(asset,all_versions)
         self.remembered_assets.pop(self.active_character,None)
-        self.refresh_assets(flush=False)
+        self.refresh_assets(flush=False,select_id=next_id)
         self.persist()
-        self.set_status(f'已将 {count} 个动画版本移入回收目录。')
+        if self.gallery:self.gallery.refresh()
+        self.set_status(f'已将 {count} 个资产版本移入回收目录。')
 
     def key_selected_asset(self):
         asset=self.selected_asset()
@@ -492,7 +515,7 @@ class Panel(QWidget):
         self.idle();self.editor.flush();session=self.selected_session();library=self.library
         if asset.get('placeholder'):raise ValueError('请先为此空资产保存修改。')
         if session.get('assetWorkspace')!=1:
-            raise ValueError('请在目标 Max 中运行新版连接脚本。')
+            raise ValueError('正在等待 Max 自动升级连接。')
         cover_scene=not key and not action
         if cover_scene:
             if 'source.max' not in asset['files']:raise ValueError('此旧版本没有完整 Max 场景，可使用「覆盖帧」。')
@@ -523,7 +546,7 @@ class Panel(QWidget):
         self.key_asset.setToolTip('此版本没有可覆盖到帧的数据。' if ready and not can_key else '')
         self.apply_button.setToolTip('此版本没有完整 Max 场景。' if ready and not self.apply_button.isEnabled() else '')
         self.create_asset_button.setEnabled(bool(self.active_character))
-        self.delete_animation_button.setEnabled(kind=='animation')
+        self.delete_asset_button.setEnabled(asset is not None)
         if asset:self.remembered_assets[self.active_character]=asset['id']
         self.selection_label.setText(asset['name'] if asset else '未选择资产')
         if asset and asset.get('placeholder'):
@@ -592,8 +615,10 @@ class Panel(QWidget):
     def start_max(self):
         if self.launching:
             self.set_status('Max 正在启动，就绪后会自动连接，请稍候。');return
-        self.idle();available=host.sessions()
-        selected=host.preferred_session(available,self.active_session or self.settings.get('session'))
+        self.idle();available=[session for session in host.sessions() if session.get('assetWorkspace')==1]
+        saved=self.active_session or self.settings.get('session')
+        selected=(host.preferred_session(available,saved)
+                  if saved or self.attach is None or self.attach.windows_count<=1 else None)
         if selected:
             self.remember_max_target(selected);self.active_session=selected['directory'];self.auto_reconnect=False;self.persist();self.poll()
             self.set_status('已连接 Max，无需重复启动。');return
@@ -602,10 +627,10 @@ class Panel(QWidget):
         if not path:path=self.choose_max_program()
         if not path:return
         process=host.launch_max(path,self.context.resource('max/bootstrap.ms'))
-        self.settings['maxExecutable']=str(path);self.active_session=None
+        self.settings['maxExecutable']=str(path);self.active_session=None;self.waiting_target=None
         self.auto_reconnect=False
         self.launching={'process':process,'pid':process.pid,'time':time.time()};self.persist()
-        self.set_status('正在启动 Max，连接脚本就绪后自动绑定该窗口…')
+        self.set_status('正在启动 Max，就绪后会自动连接该窗口…')
 
     def library_settings(self):
         self.idle();self.editor.flush();dialog=QDialog(self);dialog.setWindowTitle('资产库与同步');dialog.resize(650,200);form=QFormLayout(dialog)
@@ -635,30 +660,40 @@ class Panel(QWidget):
 
     def poll(self):
         if self.closed:return
-        available=host.sessions()
+        available=[session for session in host.sessions() if session.get('assetWorkspace')==1]
+        if self.attach:
+            self.attach.poll({(s['pid'],str(s.get('birth'))) for s in available
+                              if s.get('bridgeDigest')==self.attach.bridge_digest})
         if self.auto_reconnect and not self.launching:
             state=getattr(self.context,'workspace_state',{})
-            shared=state.get('max_target')
-            if shared and not self.active_session:
-                selected=next((item for item in available if item.get('protocol',1)>=2
-                               and (item['pid'],str(item.get('birth','')))==shared),None)
-            else:
+            target=self.waiting_target or (state.get('max_target') if not self.active_session else None)
+            if target:
+                selected=next((item for item in available if (item['pid'],str(item.get('birth','')))==target),None)
+            elif self.active_session or self.attach is None or self.attach.windows_count<=1:
                 selected=host.preferred_session(available,self.active_session)
+            else:
+                selected=None
             if selected:
-                self.remember_max_target(selected);self.active_session=selected['directory'];self.auto_reconnect=False;self.persist()
+                self.remember_max_target(selected)
+                self.waiting_target=None
+                self.active_session=selected['directory']
+                self.auto_reconnect=False
+                self.persist()
         if self.launching:
-            started=next((s for s in available if s['pid']==self.launching['pid'] and s.get('protocol',1)>=2),None)
+            started=next((s for s in available if s['pid']==self.launching['pid']),None)
             if started:
                 self.remember_max_target(started);self.active_session=started['directory'];self.launching=None;self.persist();self.set_status('Max 已启动并连接。')
             elif self.launching['process'].poll() is not None or time.time()-self.launching['time']>240:
-                self.launching=None;self.set_status('Max 未返回连接，请检查启动界面，再从“连接”菜单选择窗口。')
+                self.launching=None;self.set_status('Max 启动后暂未就绪。完成 Max 的启动提示后可从菜单选择窗口。')
         matches=[s for s in available if s['directory']==self.active_session]
-        if matches and matches[0].get('protocol',1)>=2:
+        if matches:
             self.connection_state='Max 已连接'
             session=matches[0];self.connection.setText(f"● Max · PID {session['pid']} · {Path(session.get('scene') or '未命名场景').name}  |  {session.get('start','?')} — {session.get('end','?')} 帧 · {session.get('fps','?')} FPS · 当前 {session.get('frame','?')}")
         else:
-            self.connection_state='Max 连接中' if self.launching else ('Max 已断开' if self.active_session else 'Max 未连接')
-            self.connection.setText('○ '+self.connection_state)
+            waiting=self.launching or self.waiting_target or (self.attach and self.attach.connecting)
+            self.connection_state='Max 连接中' if waiting else ('Max 已断开' if self.active_session else 'Max 未连接')
+            self.connection.setText('○ 请选择 Max 窗口' if not waiting and not self.active_session and len(available)>1 else '○ '+self.connection_state)
+            self.connection.setToolTip('等待目标 Max 空闲。' if waiting else '')
         bound=self.bound_asset(matches[0]) if matches else None
         self.editing_label.setText('当前编辑：'+bound['character']+' / '+bound['name'] if bound else '当前编辑：未绑定资产')
         pending=self.pending
@@ -693,6 +728,7 @@ class Panel(QWidget):
         elif time.time()-pending['time']>180:self.set_status('Max 尚未返回结果，仍在等待；不会重复提交或切换窗口。')
     def shutdown(self):
         if self.closed:return
+        if self.attach:self.attach.close();self.attach=None
         try:self.editor.flush()
         except Exception:self.editor.keep_draft()
         from .library import write_json
