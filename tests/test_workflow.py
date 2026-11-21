@@ -22,6 +22,28 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.library.character_info('Hero')['tpose']['id'],updated['id'])
         self.library.verify(animation)
         self.assertEqual(len(self.library.list_assets('Hero')[0]),3)
+    def test_character_can_start_with_animation_and_later_add_tpose(self):
+        stage=self.root/'native';stage.mkdir()
+        (stage/'source.max').write_bytes(b'native fixture')
+        first=self.library.import_character('Native',stage,'source.max',self.metadata,kind='animation')
+        info=self.library.character_info('Native')
+        self.assertIsNone(info['tpose'])
+        self.assertEqual(info['reference']['id'],first['id'])
+        self.assertEqual(clips.document(first)['clips'][0]['lastFrame'],60)
+        tpose=self.library.import_character('Native',stage,'source.max',self.metadata,update=True)
+        self.assertEqual(self.library.character_info('Native')['reference']['id'],tpose['id'])
+        self.assertEqual(set(a['kind'] for a in self.library.list_assets('Native')[0]),{'animation','model'})
+        self.library.verify(first)
+
+    def test_delete_moves_entire_role_and_leaves_other_roles(self):
+        asset=self.animation()
+        self.library.create_character('Other')
+        archive=self.library.delete_character('Hero')
+        self.assertEqual(self.library.characters(),['Other'])
+        self.assertEqual(read_json(archive/'character.json')['name'],'Hero')
+        self.assertTrue((archive/'animation'/Path(asset['_directory']).name/'asset.fbx').is_file())
+        with self.assertRaises(ValueError):self.library.delete_character('../Other')
+
     def test_failed_role_creation_leaves_no_empty_role(self):
         (self.source/'asset.fbx').write_bytes(b'')
         with self.assertRaises(ValueError):self.library.import_character('Bad',self.source,'asset.fbx',self.metadata)

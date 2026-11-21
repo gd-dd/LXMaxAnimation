@@ -86,6 +86,36 @@ try:
     bridge['import_asset']({'kind':'model','rig':'Generic','path':str(model/'asset.fbx')})
     assert bridge['scene_signature'](list(rt.objects))==signature
     with pymxs.attime(7):assert abs(float(rt.getNodeByName('RoleControl').finger)-50)<0.01
+    # The new role workflow saves the same contents as a normal Max scene,
+    # regardless of selection, and takes image dependencies with it.
+    camera=rt.FreeCamera(name='UnselectedCamera')
+    hidden=rt.Box(name='HiddenUnselected');hidden.isHidden=True
+    mesh=rt.getNodeByName('RoleMesh')
+    material=rt.StandardMaterial(name='OriginalMaterial')
+    material.diffuseMap=rt.Bitmaptexture(filename=str(output/'original.png'))
+    mesh.material=material
+    rt.select(mesh)
+    scene=output/'native-role';scene.mkdir()
+    original_name=str(rt.maxFilePath)+str(rt.maxFileName)
+    dirty=rt.getSaveRequired()
+    result_native=bridge['export_asset']({'kind':'animation','fullCharacterScene':True,'directory':str(scene)})
+    assert result_native['main']=='source.max'
+    assert {'RoleMesh','UnselectedCamera','HiddenUnselected'}<=set(result_native['metadata']['nodes'])
+    assert (str(rt.maxFilePath)+str(rt.maxFileName),rt.getSaveRequired())==(original_name,dirty)
+    assert [str(n.name) for n in rt.selection]==['RoleMesh']
+    texture_manifest=json.loads((scene/'textures.json').read_text('utf8'))
+    assert len(texture_manifest['textures'])==1,texture_manifest
+    (output/'original.png').rename(output/'original-unavailable.png')
+    bridge['import_asset']({'kind':'animation','path':str(scene/'source.max')})
+    assert rt.getNodeByName('HiddenUnselected').isHidden
+    assert rt.getNodeByName('UnselectedCamera') is not None
+    loaded=rt.getNodeByName('RoleMesh')
+    assert str(loaded.material.name)=='OriginalMaterial'
+    leaf=Path(str(loaded.material.diffuseMap.filename))
+    assert leaf.is_file() and leaf.is_relative_to(Path(os.environ['LOCALAPPDATA'])),leaf
+    tpose=output/'native-tpose';tpose.mkdir()
+    assert bridge['export_asset']({'kind':'model','fullCharacterScene':True,'directory':str(tpose)})['main']=='source.max'
+    report['nativeRole']='Full scene and copied material bitmap reopen with original bitmap unavailable'
     report.update(ok=True,animation=result,integrity='extra/missing rejected without output',isolation='Max save changes working scene only')
 except Exception:report['error']=traceback.format_exc()
 finally:

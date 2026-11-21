@@ -17,10 +17,12 @@ class CaptureDialog(QDialog):
         for category in panel.library.categories():self.category.addItem(category,category)
         self.selected_role_only=QCheckBox('只保存视口中选中的角色（适用于重定向场景）')
         self.rig=QComboBox();self.rig.addItems(['Generic','Biped','CAT'])
-        self.textures=QCheckBox('同时复制贴图（可选）');self.avatar=QCheckBox('从当前视口生成头像');self.avatar.setChecked(True)
+        self.initial_kind=QComboBox();self.initial_kind.addItem('动画','animation');self.initial_kind.addItem('T-pose','model')
+        self.avatar=QCheckBox('从当前视口生成头像');self.avatar.setChecked(True)
         if kind=='model':
-            form.addRow('分类',self.category);form.addRow('骨骼类型',self.rig);form.addRow(self.textures);form.addRow(self.avatar)
-            label=QLabel('先摆好 T-pose，再选中全部角色内容。\n模型、骨骼、控制器、辅助节点都必须选全。')
+            form.addRow('分类',self.category);form.addRow('骨骼类型',self.rig);form.addRow(self.avatar)
+            if not update:form.addRow('首次保存为',self.initial_kind)
+            label=QLabel('保存当前完整 Max 场景，包括未选中的对象、材质和可找到的贴图。保存 T-pose 前，请先将角色摆到参考姿态。')
             if update:
                 info=panel.library.character_info(update);self.rig.setCurrentText(info.get('rig','Generic'));self.category.setCurrentIndex(max(0,self.category.findData(info.get('category',''))))
         else:
@@ -52,6 +54,7 @@ class CharacterDialog(QDialog):
         self.cards.itemDoubleClicked.connect(lambda *_:self.panel.guard(self.choose));layout.addWidget(self.cards,1)
         row=QHBoxLayout()
         row.addWidget(self.button('从 Max 导入角色',lambda:panel.capture('model')))
+        row.addWidget(self.button('删除角色',self.delete_role))
         more=QToolButton();more.setText('角色管理');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
         for title,fn in [('更新 T-pose',self.update),('导出角色到 Max',self.export),('更换头像',self.avatar),('设置分类',self.set_category),('新建分类',self.add_category)]:menu.addAction(title,lambda fn=fn:self.panel.guard(fn))
         more.setMenu(menu);row.addWidget(more);row.addStretch();row.addWidget(self.button('选择角色',self.choose))
@@ -84,7 +87,7 @@ class CharacterDialog(QDialog):
                 path=contained(library.root/'characters'/name,info['avatar'])
                 if path.is_file():icon=path
             item=QListWidgetItem(QIcon(str(icon)),name+'\n'+(info['category'] or '未分类'))
-            item.setData(Qt.ItemDataRole.UserRole,name);item.setToolTip(name+'\n'+('已有 T-pose' if info['tpose'] else '旧版空角色，请更新 T-pose'))
+            item.setData(Qt.ItemDataRole.UserRole,name);item.setToolTip(name+'\n'+('已有 T-pose' if info['tpose'] else ('已有初始动画，可补存 T-pose' if info['reference'] else '暂无角色场景')))
             self.cards.addItem(item)
             if selected==name:self.cards.setCurrentItem(item)
 
@@ -94,9 +97,17 @@ class CharacterDialog(QDialog):
     def update(self):self.panel.capture('model',update=self.selected())
 
     def export(self):
-        asset=self.panel.library.character_info(self.selected())['tpose']
-        if not asset:raise ValueError('角色没有 T-pose，请先更新。')
+        asset=self.panel.library.character_info(self.selected())['reference']
+        if not asset:raise ValueError('角色没有可打开的 Max 场景。')
         self.panel.send_to_max(asset)
+
+    def delete_role(self):
+        name=self.selected()
+        self.panel.idle()
+        prompt=f'将角色「{name}」及其动画、Pose 和历史版本移出角色库，文件保留在库内回收目录。确定继续？'
+        if QMessageBox.question(self,'删除角色',prompt)!=QMessageBox.StandardButton.Yes:
+            return
+        self.panel.delete_character(name)
 
     def add_category(self):
         name,ok=QInputDialog.getText(self,'新建分类','分类名称')

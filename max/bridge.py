@@ -224,7 +224,62 @@ def param(export,name,value=None):
     if str(result).lower()=='unsupplied':raise ValueError('FBX 插件不支持参数：'+name)
 
 
+def export_character_scene(args):
+    folder = Path(args['directory']).resolve()
+    if not folder.is_dir() or any(folder.iterdir()):
+        raise ValueError('导出临时目录必须存在且为空。')
+    if args['kind'] not in ('model','animation'):
+        raise ValueError('完整角色场景只支持 T-pose 或动画。')
+    scene = folder / 'source.max'
+    if not rt.saveMaxFile(str(scene),useNewFile=False,clearNeedSaveFlag=False,quiet=True):
+        raise RuntimeError('完整 Max 场景保存失败。')
+    textures, missing, warnings = [], [], []
+    for asset in rt.getMAXFileAssetMetadata(str(scene)):
+        if str(asset.type).lstrip('#').casefold() != 'bitmap':
+            continue
+        original = str(asset.filename)
+        resolved = Path(str(asset.resolvedFilename) or original)
+        if not resolved.is_file():
+            resolved = Path(str(rt.mapPaths.getFullFilePath(original)))
+        if not resolved.is_file():
+            missing.append(original)
+            continue
+        suffix = hashlib.sha256(str(resolved.resolve()).encode()).hexdigest()[:12]
+        destination = folder / 'textures' / (resolved.stem+'-'+suffix+resolved.suffix)
+        destination.parent.mkdir(exist_ok=True)
+        if not destination.exists():
+            shutil.copy2(resolved,destination)
+        textures.append({'source':original,'assetId':str(asset.assetId),'file':destination.relative_to(folder).as_posix()})
+    write_json(folder/'textures.json',{'textures':textures,'missing':missing})
+    if missing:
+        warnings.append('以下贴图缺失，已保留原路径：'+', '.join(dict.fromkeys(missing)))
+    if args.get('captureAvatar'):
+        try:
+            bitmap=rt.gw.getViewportDib()
+            try:
+                bitmap.filename=str(folder/'avatar.png')
+                rt.save(bitmap)
+            finally:
+                rt.close(bitmap)
+        except Exception as exc:
+            warnings.append('视口截图失败，可手动设置头像：'+str(exc))
+    nodes=list(rt.objects)
+    try:
+        signature=scene_signature(nodes)
+    except ValueError:
+        signature=None
+        warnings.append('场景有重名对象，原生场景已完整保存。按对象匹配的 Pose 或动画操作需要唯一名称。')
+    metadata=dict(rig=args.get('rig','Generic'),fps=int(rt.frameRate),start=float(rt.animationRange.start),
+                  end=float(rt.animationRange.end),frame=float(rt.sliderTime),nodes=[str(n.name) for n in nodes],
+                  signature=signature,scene=str(rt.maxFilePath)+str(rt.maxFileName),includeTextures=True,
+                  fullCharacterScene=True,warnings=warnings)
+    return dict(ok=True,main='source.max',warnings=warnings,metadata=metadata)
+
+
 def export_asset(args):
+    if args.get('fullCharacterScene'):
+        return export_character_scene(args)
+
     kind=args['kind']
     scoped=args.get('selectedRoleOnly',False)
     if scoped and (kind not in ('animation','pose') or args.get('expected') is None):
@@ -326,24 +381,36 @@ def import_asset(args):
     rig=args.get('rig','Generic')
     if not path.is_file():raise ValueError('资产文件不存在。')
     if args['kind']=='pose':return apply_pose(path,rig)
-    if path.suffix.lower()!='.fbx':raise ValueError('Expected FBX')
-    if args['kind'] in ('animation','model') and (path.parent/'source.max').is_file():
-        source=path.parent/'source.max'
-        if not source.is_file():raise ValueError('此动画没有 Max 场景快照，请从 Max 重新导入。')
+    source=path if path.suffix.lower()=='.max' else path.parent/'source.max'
+    if args['kind'] in ('animation','model') and source.is_file():
         # Open a working copy so Ctrl+S cannot overwrite an immutable library revision.
         working_root=Path(os.environ['LOCALAPPDATA'])/'LXMaxAnimation/working-scenes';working_root.mkdir(parents=True,exist_ok=True)
         working=working_root/(uuid.uuid4().hex+'.max');shutil.copy2(source,working)
-        if not rt.loadMaxFile(str(working),quiet=True):raise RuntimeError('动画场景加载失败。')
         textures=path.parent/'textures.json'
+        mapping={};asset_paths={}
         if textures.is_file():
-            mapping={}
             for item in json.loads(textures.read_text('utf-8'))['textures']:
                 original=(path.parent/item['file']).resolve()
                 if not original.is_relative_to(path.parent.resolve()) or not original.is_file():raise ValueError('贴图路径无效。')
                 target=working_root/working.stem/original.name;target.parent.mkdir(exist_ok=True)
-                shutil.copy2(original,target);mapping[item['source']]=str(target)
-            for bitmap in rt.getClassInstances(rt.Bitmaptexture):
-                if str(bitmap.filename) in mapping:bitmap.filename=mapping[str(bitmap.filename)]
+                shutil.copy2(original,target)
+                mapping[item['source']]=str(target)
+                if item.get('assetId'):
+                    asset_paths[item['assetId']]=str(target)
+        if asset_paths:
+            assets=rt.getMAXFileAssetMetadata(str(working))
+            for asset in assets:
+                target=asset_paths.get(str(asset.assetId))
+                if target:
+                    asset.filename=target
+            rt.setMAXFileAssetMetadata(str(working),assets)
+        if not rt.loadMaxFile(str(working),quiet=True):raise RuntimeError('Max 场景加载失败。')
+        changed=False
+        for bitmap in rt.getClassInstances(rt.Bitmaptexture) if mapping else ():
+            if str(bitmap.filename) in mapping:
+                bitmap.filename=mapping[str(bitmap.filename)]
+                changed=True
+        if changed:
             rt.saveMaxFile(str(working),quiet=True)
         return {'ok':True,'working':str(working),'message':'已打开角色工作场景；编辑与保存只影响工作副本。' if args['kind']=='model' else '已替换当前 Max 场景；编辑与保存只影响工作副本。'}
     raise ValueError('此资产没有原生 Max 场景，请从 Max 重新导入。')
@@ -370,7 +437,7 @@ class Bridge:
         if self.busy:return
         self.busy=True
         try:
-            write_json(self.root/'info.json',{'protocol':2,'pid':os.getpid(),'birth':self.birth,'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0]),'frame':float(rt.sliderTime),'start':float(rt.animationRange.start),'end':float(rt.animationRange.end),'fps':int(rt.frameRate),'selection':[str(n.name) for n in rt.selection]})
+            write_json(self.root/'info.json',{'protocol':2,'fullCharacterScene':1,'pid':os.getpid(),'birth':self.birth,'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0]),'frame':float(rt.sliderTime),'start':float(rt.animationRange.start),'end':float(rt.animationRange.end),'fps':int(rt.frameRate),'selection':[str(n.name) for n in rt.selection]})
             for path in self.root.glob('*.request.json'):
                 working=path.with_suffix('.working');path.rename(working)
                 try:

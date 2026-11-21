@@ -185,7 +185,7 @@ class Panel(QWidget):
         self.require_library()
         if not self.active_character:raise ValueError('请先从角色库导入并选择角色。')
         info=self.library.character_info(self.active_character)
-        if not info['tpose']:raise ValueError('此旧版角色没有 T-pose，请在角色库更新。')
+        if not info['reference']:raise ValueError('此角色缺少可用场景，请先在角色库保存 T-pose。')
         return info
     def selected_asset(self):
         item=self.assets.currentItem()
@@ -207,6 +207,20 @@ class Panel(QWidget):
     def choose_character(self,name):
         self.idle();self.editor.flush();self.active_character=name;self.editor.set_asset(None,None)
         self.update_character_header();self.refresh_assets(flush=False);self.persist()
+    def delete_character(self,name):
+        self.idle()
+        self.editor.flush()
+        self.library.delete_character(name)
+        self.remembered_assets.pop(name,None)
+        if self.active_character==name:
+            self.active_character=None
+            self.editor.set_asset(None,None)
+            self.update_character_header()
+            self.refresh_assets(flush=False)
+        self.persist()
+        if self.gallery:self.gallery.refresh()
+        self.set_status(f'已删除角色「{name}」，可从库内回收目录找回文件。')
+
     def open_gallery(self):
         self.require_library()
         if self.gallery is None:
@@ -275,19 +289,30 @@ class Panel(QWidget):
         if not replace and not dialog.exec():return
         name=dialog.name.text().strip();character=name if kind=='model' else self.active_character
         if kind=='model' and not update and any(c.casefold()==name.casefold() for c in library.characters()):raise ValueError('角色已存在，请使用更新 T-pose。')
-        stage=library.stage()
-        args={'directory':str(stage),'kind':kind,'rig':dialog.rig.currentText() if kind=='model' else info.get('rig','Generic'),
-              'sceneRange':True,'includeTextures':dialog.textures.isChecked(),'captureAvatar':kind=='model' and dialog.avatar.isChecked()}
+        character_capture=kind=='model'
+        if character_capture and session.get('fullCharacterScene')!=1:
+            raise ValueError('请在目标 Max 窗口运行新版连接脚本一次，再保存完整角色场景。')
+        asset_kind=dialog.initial_kind.currentData() if character_capture and not update else kind
+        args={'kind':asset_kind,'rig':dialog.rig.currentText() if character_capture else info.get('rig','Generic'),
+              'sceneRange':True,'captureAvatar':character_capture and dialog.avatar.isChecked()}
         if info:
-            args['includeTextures']=bool(info['tpose']['metadata'].get('includeTextures',False))
-            expected=info['tpose']['metadata'].get('signature')
-            if not expected:raise ValueError('角色缺少完整场景清单，请先在角色库更新 T-pose。')
+            metadata=info['reference']['metadata']
+            args['includeTextures']=bool(metadata.get('includeTextures',False))
+            expected=metadata.get('signature')
+            if expected is None:raise ValueError('角色缺少可匹配的对象清单，请检查重名对象并更新 T-pose。')
             args['expected']=expected
             if dialog.selected_role_only.isChecked():
                 args['selectedRoleOnly']=True
-        else:args['strictSelection']=True
-        result=host.request(session,'export',**args)
-        self.pending={'result':str(result),'time':time.time(),'stage':stage,'kind':kind,'name':name,'character':character,'category':dialog.category.currentData() or '',
+        else:
+            args['fullCharacterScene']=True
+        stage=library.stage()
+        try:
+            result=host.request(session,'export',directory=str(stage),**args)
+        except Exception:
+            stage.rmdir()
+            raise
+        self.pending={'result':str(result),'time':time.time(),'stage':stage,'kind':asset_kind,'name':name,'character':character,
+                      'characterCapture':character_capture,'category':dialog.category.currentData() or '',
                       'update':bool(update),'notes':dialog.notes.text(),'replace':replace,'session':session['directory'],'type':'export'}
         self.set_status('正在读取所连接 Max 的当前场景…')
     def overwrite(self):
@@ -429,7 +454,10 @@ class Panel(QWidget):
                 if pending['type']=='import':self.set_status(result.get('message','完成。'));return
                 library=self.library
                 def publish():
-                    if pending['kind']=='model':asset=library.import_character(pending['character'],pending['stage'],result['main'],result['metadata'],pending['category'],pending['update'])
+                    if pending['characterCapture']:
+                        if result['main']!='source.max':raise ValueError('Max 未返回完整角色场景，请重新接入后再保存。')
+                        asset=library.import_character(pending['character'],pending['stage'],result['main'],result['metadata'],
+                                                       pending['category'],pending['update'],pending['kind'],pending['notes'])
                     else:asset=library.publish(pending['character'],pending['name'],pending['kind'],pending['stage'],result['main'],pending['notes'],result['metadata'])
                     if pending['replace']:
                         warning=library.mark_superseded(pending['replace'],asset)

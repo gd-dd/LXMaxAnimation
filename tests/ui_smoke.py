@@ -118,5 +118,18 @@ with tempfile.TemporaryDirectory() as temp:
             panel.poll();assert panel.active_session=='test-session'
             panel.disconnect();panel.poll();assert panel.active_session is None
             panel.start_max();assert panel.active_session=='test-session' and launch.call_count==1
+    from PySide6.QtWidgets import QMessageBox
+    panel.gallery.category.setCurrentIndex(0)
+    cards=panel.gallery.cards
+    other=next(cards.item(i) for i in range(cards.count())
+               if cards.item(i).data(Qt.ItemDataRole.UserRole)=='另一个角色')
+    cards.setCurrentItem(other)
+    with patch('ui.dialogs.QMessageBox.question',return_value=QMessageBox.StandardButton.No):
+        panel.gallery.delete_role()
+    assert '另一个角色' in library.characters()
+    with patch('ui.dialogs.QMessageBox.question',return_value=QMessageBox.StandardButton.Yes):
+        panel.gallery.delete_role()
+    assert '另一个角色' not in library.characters()
+    assert len(list((library.root/'.staging/deleted-characters').glob('*/character.json')))==1
     panel.shutdown();panel.shutdown();shell.close()
 print('UI passed: embedded widget, sorting/search, role category gallery, independent clip settings, validation and persistence')

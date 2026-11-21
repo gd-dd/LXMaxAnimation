@@ -82,6 +82,19 @@ class Library:
         folder.mkdir(parents=True, exist_ok=False)
         write_json(folder / 'character.json', {'schema': 1, 'name': name})
 
+    def delete_character(self, name):
+        name = safe_name(name)
+        source = self.root / 'characters' / name
+        if name not in self.characters() or source.resolve() != source:
+            raise ValueError('找不到可删除的角色目录。')
+        archive = self.root / '.staging' / 'deleted-characters'
+        if archive.resolve() != archive:
+            raise ValueError('角色回收目录路径无效。')
+        archive.mkdir(parents=True,exist_ok=True)
+        target = archive / (uuid.uuid4().hex + '-' + name)
+        source.rename(target)
+        return target
+
     def list_assets(self, character=None, query='', kind=None):
         result, errors = [], []
         for name in ([safe_name(character)] if character else self.characters()):
@@ -112,8 +125,8 @@ class Library:
         main_path = contained(source, main)
         if not main_path.is_file() or main_path.stat().st_size == 0:
             raise ValueError('主文件不存在或为空。')
-        if kind in ('model', 'animation') and main_path.suffix.lower() != '.fbx':
-            raise ValueError('模型和动画主文件必须是 FBX。')
+        if kind in ('model', 'animation') and main_path.suffix.lower() not in ('.fbx','.max'):
+            raise ValueError('模型和动画主文件必须是 FBX 或 Max 场景。')
         if kind == 'pose' and read_json(main_path).get('schema') != 1:
             raise ValueError('Pose 文件格式不正确。')
         revision = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:8]
@@ -170,6 +183,10 @@ class Library:
         assets, _ = self.list_assets(name, kind='model')
         current = next((a for a in assets if a['id'] == info.get('tposeAssetId')), assets[0] if assets else None)
         info['tpose'] = current
+        info['reference'] = current
+        if not current and info.get('sceneAssetId'):
+            animations, _ = self.list_assets(name,kind='animation')
+            info['reference'] = next((a for a in animations if a['id']==info['sceneAssetId']),None)
         return info
 
     def categories(self):
@@ -186,7 +203,7 @@ class Library:
     def update_character_info(self, name, **changes):
         folder = contained(self.root, 'characters/' + safe_name(name))
         info = read_json(folder / 'character.json')
-        allowed = {'category', 'avatar', 'tposeAssetId', 'rig'}
+        allowed = {'category', 'avatar', 'tposeAssetId', 'sceneAssetId', 'rig'}
         if set(changes) - allowed:
             raise ValueError('未知角色字段。')
         if changes.get('category') and changes['category'] not in self.categories():
@@ -205,22 +222,27 @@ class Library:
         shutil.copy2(file, target)
         self.update_character_info(name, avatar=relative)
 
-    def import_character(self, name, source, main, metadata, category='', update=False):
+    def import_character(self, name, source, main, metadata, category='', update=False, kind='model', notes=''):
         name = safe_name(name)
         if category and category not in self.categories():
             raise ValueError('分类不存在。')
         exists = name in self.characters()
         if exists != update:
             raise ValueError('角色已存在，请使用更新 T-pose。' if exists else '待更新的角色不存在。')
-        if not (Path(source) / 'tpose.json').is_file():
-            raise ValueError('角色必须包含 T-pose。')
+        native = Path(main).suffix.lower()=='.max'
+        if kind not in ('model','animation') or (kind=='animation' and (update or not native)):
+            raise ValueError('首次角色动画必须包含完整 Max 场景。')
+        if kind=='model' and not native and not (Path(source) / 'tpose.json').is_file():
+            raise ValueError('旧版角色包必须包含 T-pose。')
         if not exists:
             self.create_character(name)
         original_info=read_json(contained(self.root,'characters/'+name)/'character.json')
         asset=None
         try:
-            asset = self.publish(name, 'T-pose', 'model', source, main, metadata=metadata)
-            self.update_character_info(name, tposeAssetId=asset['id'], rig=metadata.get('rig', 'Generic'), category=category)
+            label, field = ('T-pose','tposeAssetId') if kind=='model' else ('初始动画','sceneAssetId')
+            asset = self.publish(name,label,kind,source,main,notes=notes,metadata=metadata)
+            self.update_character_info(name, rig=metadata.get('rig','Generic'), category=category,
+                                       **{field:asset['id']})
             avatar = Path(source) / 'avatar.png'
             if avatar.is_file():
                 self.set_avatar(name, avatar)
