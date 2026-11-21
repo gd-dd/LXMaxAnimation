@@ -57,7 +57,8 @@ class ConnectionTests(unittest.TestCase):
    try:
     with patch.object(max_connection,'windows',return_value=windows),patch.object(max_connection,'attach_window',return_value=True) as attach:
      controller.poll({(1251,'ready')})
-     controller.job.result(timeout=3)
+     controller.job.join(timeout=3)
+     self.assertFalse(controller.job.is_alive())
     self.assertEqual(controller.windows_count,2)
     self.assertEqual(attach.call_args.args[0],windows[-1])
    finally:
