@@ -41,7 +41,7 @@ class WorkflowTests(unittest.TestCase):
         archive=self.library.delete_character('Hero')
         self.assertEqual(self.library.characters(),['Other'])
         self.assertEqual(read_json(archive/'character.json')['name'],'Hero')
-        self.assertTrue((archive/'animation'/Path(asset['_directory']).name/'asset.fbx').is_file())
+        self.assertTrue((archive/Path(asset['_directory']).relative_to(self.library.root/'characters/Hero')/'asset.fbx').is_file())
         with self.assertRaises(ValueError):self.library.delete_character('../Other')
 
     def test_failed_role_creation_leaves_no_empty_role(self):
@@ -81,6 +81,36 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(len(list((archived/'model').glob('*/*/asset.json'))),1)
         self.assertEqual(self.library.delete_asset(self.character),1)
         self.assertIsNone(self.library.character_info('Hero')['reference'])
+
+    def test_asset_version_and_notes_preserve_contributor_identity(self):
+        self.library.actor=lambda:'创建者'
+        first=self.library.create_asset('Hero','新的动画','animation')
+        self.library.actor=lambda:'版本作者'
+        current=self.library.save_asset_revision(first,'animation',self.source,'asset.fbx',self.metadata)
+        self.assertEqual(current['assetCreatedBy'],'创建者')
+        self.assertEqual(current['assetCreatedAt'],first['created'])
+        self.assertEqual(current['createdBy'],'版本作者')
+        self.library.actor=lambda:'备注编辑者'
+        self.library.set_notes(current,'镜头二可用')
+        saved=read_json(Path(current['_directory'])/'asset.json')
+        self.assertEqual((saved['notes'],saved['createdBy'],saved['updatedBy']),('镜头二可用','版本作者','备注编辑者'))
+        self.assertEqual(saved['assetCreatedBy'],'创建者')
+        self.assertTrue(saved['updatedAt'])
+
+    def test_named_asset_directory_with_history_and_legacy_versions(self):
+        first=self.library.publish('Hero','起步 Walk','animation',self.source,'asset.fbx',metadata=self.metadata)
+        group,folder=self.library.asset_location(first)
+        self.assertEqual(group,self.library.root/'characters/Hero/animation/起步 Walk')
+        self.assertEqual(folder,group/'versions'/first['revision'])
+        legacy=self.library.root/'characters/Hero/animation/起步 Walk--旧版'
+        folder.rename(legacy)
+        old=dict(first,_directory=str(legacy))
+        second=self.library.save_asset_revision(old,'animation',self.source,'asset.fbx',self.metadata)
+        third=self.library.save_asset_revision(second,'animation',self.source,'asset.fbx',self.metadata)
+        self.assertEqual(self.library.asset_location(second)[0],group)
+        self.assertEqual(self.library.asset_location(third)[0],group)
+        self.assertEqual(self.library.asset_location(old),(legacy,legacy))
+        self.assertEqual(self.library.delete_asset(third,all_versions=True),3)
 
     def test_clip_independence_and_version_binding(self):
         asset=self.animation();data=clips.document(asset);second=clips.new_clip('Run',20,40);data['clips'].append(second)

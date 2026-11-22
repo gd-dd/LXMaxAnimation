@@ -181,5 +181,44 @@ with tempfile.TemporaryDirectory() as temp:
     archived=library.root/'.staging/deleted-animations'
     assert len(list(archived.glob('*/*/asset.json')))==1 and not list(archived.glob('*/*/clips.json'))
     assert [entry['id'] for entry in library.list_assets('新角色')[0]]==[saved['id']]
+    from ui.dialogs import AssetDetailsDialog
+    older=library.publish('新角色','共用表情','pose',source,'pose.json',metadata={'frame':0})
+    newer=library.publish('新角色','共用表情','pose',source,'pose.json',metadata={'frame':8})
+    panel.refresh_assets(select_id=newer['id'],flush=False)
+    actions=[]
+    def exercise_details(dialog):
+        assert dialog.versions.topLevelItemCount()==2
+        assert dialog.selected()['id']==newer['id']
+        with patch('ui.panel.os.startfile',create=True) as reveal:
+            dialog.reveal.click()
+            reveal.assert_called_once_with(newer['_directory'])
+        dialog.versions.setCurrentItem(dialog.versions.topLevelItem(1))
+        dialog.notes.setPlainText('历史版本保留原表情')
+        dialog.save.click()
+        assert dialog.selected()['id']==older['id']
+        assert dialog.selected()['notes']=='历史版本保留原表情'
+        dialog.grab().save(str(output/'asset-details.png'))
+        with patch('ui.dialogs.QMessageBox.question',return_value=QMessageBox.StandardButton.Yes):
+            dialog.remove.click()
+        assert dialog.versions.topLevelItemCount()==1
+        assert dialog.selected()['id']==newer['id']
+        actions.append('details')
+        return QDialog.DialogCode.Accepted
+    class DetailsMenu:
+        def __init__(self,parent):pass
+        def addAction(self,text,action):
+            if text=='详情信息…':self.action=action
+            else:
+                assert text=='打开资产目录'
+                with patch('ui.panel.os.startfile',create=True) as reveal:
+                    action()
+                    reveal.assert_called_once_with(str(library.asset_location(newer)[0]))
+        def exec(self,position):
+            self.action()
+    with patch.object(AssetDetailsDialog,'exec',exercise_details),patch('ui.panel.QMenu',DetailsMenu):
+        area=panel.assets.visualItemRect(panel.assets.currentItem())
+        panel.assets.customContextMenuRequested.emit(area.center())
+    assert actions==['details'] and panel.selected_asset()['id']==newer['id']
+    assert not Path(older['_directory']).exists()
     panel.shutdown();panel.shutdown();shell.close()
 print('UI passed: embedded widget, sorting/search, role category gallery, independent clip settings, validation and persistence')

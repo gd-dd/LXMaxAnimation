@@ -11,7 +11,7 @@ from .library import Library,KINDS,read_json,contained
 from . import integrations as host
 from . import max_connection
 from .clip_editor import ClipEditor
-from .dialogs import CharacterDialog,CreateAssetDialog
+from .dialogs import AssetDetailsDialog,CharacterDialog,CreateAssetDialog
 from .widgets import WheelRouter,AssetTree,ElidedLabel
 
 
@@ -131,6 +131,8 @@ class Panel(QWidget):
         self.assets.header().setToolTip("拖动表头分隔线，调整分隔线左侧的列")
         self.assets.setColumnWidth(0,125)
         self.assets.setColumnWidth(1,72);self.assets.setColumnWidth(2,58)
+        self.assets.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.assets.customContextMenuRequested.connect(self.asset_menu)
         self.assets.currentItemChanged.connect(self.asset_changed)
         self.assets.itemChanged.connect(self.asset_metadata_changed);leftbox.addWidget(self.assets,1)
         management=QHBoxLayout()
@@ -229,7 +231,7 @@ class Panel(QWidget):
         if not item:raise ValueError('请先选择一项资产。')
         return self.version_choice.currentData() or item.data(0,Qt.ItemDataRole.UserRole)
     def load_library(self,path):
-        self.editor.flush();self.library=Library(path);self.library.initialize()
+        self.editor.flush();self.library=Library(path,lambda:host.git_identity(Path(path).resolve()));self.library.initialize()
         names=self.library.characters();previous=self.settings.get('character')
         self.active_character=previous if previous in names else (names[0] if names else None)
         self.editor.set_asset(None,None);self.update_character_header();self.refresh_assets(flush=False);self.persist()
@@ -296,6 +298,34 @@ class Panel(QWidget):
         self.restoring=False
         self.load_asset_versions(chosen,chosen_version)
         if errors:self.set_status('索引异常：'+'; '.join(errors))
+    def asset_menu(self,position):
+        item=self.assets.itemAt(position)
+        if not item:
+            return
+        menu=QMenu(self.assets)
+        menu.addAction('详情信息…',lambda:self.guard(lambda:self.open_asset_details(item)))
+        menu.addAction('打开资产目录',lambda:self.guard(lambda:self.reveal_asset(
+            self.selected_asset() if item is self.assets.currentItem() else item.data(0,Qt.ItemDataRole.UserRole))))
+        menu.exec(self.assets.viewport().mapToGlobal(position))
+
+    def reveal_asset(self,asset,version=False):
+        group, folder = self.library.asset_location(asset)
+        os.startfile(str(folder if version else group))
+
+    def open_asset_details(self,item):
+        self.idle()
+        try:self.editor.flush()
+        except ValueError:self.editor.keep_draft()
+        asset=self.selected_asset() if item is self.assets.currentItem() else item.data(0,Qt.ItemDataRole.UserRole)
+        dialog=AssetDetailsDialog(self,asset)
+        dialog.exec()
+        if dialog.changed:
+            selected=dialog.selected()['id'] if dialog.versions.currentItem() else None
+            self.remembered_assets.pop(self.active_character,None)
+            self.refresh_assets(flush=False,select_id=selected)
+            self.persist()
+            if self.gallery:self.gallery.refresh()
+
     def asset_changed(self,item,old):
         if self.restoring:return
         try:self.editor.flush()
@@ -571,7 +601,7 @@ class Panel(QWidget):
             versions=item.data(0,Qt.ItemDataRole.UserRole+1) if key=='name' else [asset]
             if key=='name' and value!=asset['name']:
                 existing,_=self.library.list_assets(asset['character'],kind=asset['kind'])
-                if any(entry['name']==value for entry in existing):
+                if any(entry['name'].casefold()==value.casefold() and entry['name']!=asset['name'] for entry in existing):
                     raise ValueError('已有同名资产。')
             updates=[]
             for version in versions:
@@ -580,7 +610,7 @@ class Panel(QWidget):
             written=[]
             try:
                 for path,original in updates:
-                    write_json(path,dict(original,**{key:value}))
+                    write_json(path,self.library.stamp(dict(original,**{key:value})))
                     written.append((path,original))
             except OSError:
                 for path,original in reversed(written):
@@ -639,15 +669,28 @@ class Panel(QWidget):
             value=QFileDialog.getExistingDirectory(dialog,'选择资产库',path.text())
             if value:path.setText(value)
         row.addWidget(self.button('选择目录',browse));form.addRow('本地目录',row)
-        remote=QLineEdit(self.settings.get('remote',''));form.addRow('GitHub 仓库',remote)
+        remote=QLineEdit(self.settings.get('remote',''));form.addRow('共享仓库',remote)
+        form.addRow(QLabel('团队成员使用同一个仓库，各自在本机选择空目录连接。仓库访问权限由 GitHub 管理。'))
         def apply():
             self.settings['remote']=remote.text().strip();self.load_library(path.text());dialog.accept()
         form.addRow(self.button('应用目录',apply));row=QHBoxLayout()
         def sync(operation):
             if Path(path.text()).resolve()!=self.library.root:raise ValueError('请先应用目录。')
-            self.settings['remote']=remote.text().strip();self.persist();dialog.accept();library=self.library
-            fn=(lambda:host.init_git(library.root,self.settings['remote'])) if operation=='init' else (lambda:host.sync_git(library.root,operation))
+            address=remote.text().strip()
+            self.settings['remote']=address;self.persist();dialog.accept();library=self.library
+            fn=(lambda:host.init_git(library.root,address)) if operation=='init' else (lambda:host.sync_git(library.root,operation,address))
             self.run_job(fn,'正在同步资产库…',lambda message:(self.refresh_assets(),self.set_status(message)))
+        def join_shared():
+            target=Path(path.text().strip())
+            address=host.shared_url(remote.text().strip())
+            if not path.text().strip():raise ValueError('请选择共享资产库目录。')
+            dialog.accept()
+            def ready(folder):
+                self.settings['remote']=address
+                self.load_library(folder)
+                self.set_status('已连接共享资产库。')
+            self.run_job(lambda:host.clone_shared_library(target,address),'正在连接共享资产库…',ready)
+        row.addWidget(self.button('连接共享库',join_shared))
         for title,operation in [('初始化 Git LFS','init'),('拉取','pull'),('保存并推送','push')]:row.addWidget(self.button(title,lambda operation=operation:sync(operation)))
         form.addRow(row);dialog.exec()
     def remember_max_target(self, session):

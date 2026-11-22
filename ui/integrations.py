@@ -6,8 +6,10 @@ import shutil
 import subprocess
 import time
 import uuid
+import tempfile
+import re
 from urllib.request import getproxies
-from .library import write_json, read_json, contained
+from .library import write_json, read_json, contained, digest
 from . import max_connection
 
 def max_installations():
@@ -140,19 +142,94 @@ def send_unity(library, asset, project, receiver, rig='Generic'):
     return queue / (ident + '.result.json')
 
 
-def git_run(root, *args):
+def git_program():
+    found=shutil.which('git')
+    if found:
+        return found
+    for base in ('ProgramFiles','LOCALAPPDATA'):
+        if os.environ.get(base):
+            prefix=Path(os.environ[base])
+            if base=='LOCALAPPDATA':prefix=prefix/'Programs'
+            path=prefix/'Git/cmd/git.exe'
+            if path.is_file():
+                return str(path)
+    package=Path(__file__).resolve().parents[1]
+    if package.parent.name=='versions' and package.parent.parent.name.endswith('--1433389279'):
+        runtime=package.parents[2]/'LXGit--1432888469/runtime/git'
+        for marker in sorted(runtime.glob('*/lxgit-ready.json'),reverse=True):
+            try:
+                git=marker.parent/'cmd/git.exe'
+                if git.resolve()==git and digest(git)==read_json(marker)['files']['cmd/git.exe']:
+                    return str(git)
+            except (OSError,ValueError,KeyError,TypeError):
+                continue
+    raise ValueError('找不到 Git。请先在 LXGit 中准备 Git，或安装 Git for Windows。')
+
+
+def git_run(root, *args, timeout=300):
     env={**os.environ, 'GIT_TERMINAL_PROMPT':'0'}
+    program=git_program()
+    portable=Path(program).parent.parent
+    if (portable/'lxgit-ready.json').is_file():
+        env['PATH']=os.pathsep.join(str(portable/folder) for folder in ('cmd','ucrt64/bin','usr/bin'))+os.pathsep+env.get('PATH','')
     # Git does not automatically read Windows Internet Settings; honor the
     # user's active system proxy without changing global Git configuration.
     for scheme,proxy in getproxies().items():
         if scheme in ('http','https') and proxy:
             env.setdefault(scheme.upper()+'_PROXY',proxy)
-    result = subprocess.run(['git', '-C', str(root), *args], capture_output=True, text=True, encoding='utf-8', errors='replace',
-                            timeout=300, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+    result = subprocess.run([program, '-C', str(root), *args], capture_output=True, text=True, encoding='utf-8', errors='replace',
+                            timeout=timeout, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
                             env=env)
     if result.returncode:
         raise RuntimeError((result.stderr or result.stdout).strip())
     return result.stdout.strip()
+
+
+def git_identity(root):
+    if (root/'.git').exists():
+        try:
+            return git_run(root,'config','--get','user.name',timeout=4) or None
+        except (ValueError,RuntimeError,OSError,subprocess.TimeoutExpired):
+            pass
+    user=os.environ.get('USERNAME') or os.environ.get('USER')
+    return user+'（本机）' if user else None
+
+
+def asset_history(root, asset):
+    if not (root/'.git').exists():
+        return []
+    folder=contained(root,Path(asset['_directory']).relative_to(root))
+    log=git_run(root,'log','--max-count=100','--format=%H%x00%an%x00%aI%x00%cn%x00%cI%x00%s',
+                '--',folder.relative_to(root).as_posix(),timeout=8)
+    return [line.split('\0',5) for line in log.splitlines() if line.count('\0')==5]
+
+
+def shared_url(remote):
+    if not re.fullmatch(r'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?',remote):
+        raise ValueError('请填写不含凭据的 GitHub 仓库 HTTPS 地址。')
+    return remote.rstrip('/')
+
+
+def clone_shared_library(target, remote):
+    remote=shared_url(remote)
+    target=Path(target).resolve()
+    if target.exists() and (not target.is_dir() or any(target.iterdir())):
+        raise ValueError('请选择一个空目录存放共享资产库。')
+    target.parent.mkdir(parents=True,exist_ok=True)
+    stage=Path(tempfile.mkdtemp(prefix='.lx-library-',dir=target.parent))
+    try:
+        git_run(target.parent,'clone','--branch','main','--single-branch','--',remote,str(stage))
+        if read_json(stage/'library.json').get('schema')!=1:
+            raise ValueError('指定仓库不是可用的 LXMaxAnimation 资产库。')
+        git_run(stage,'lfs','install','--local')
+        git_run(stage,'lfs','pull')
+        if target.exists():
+            target.rmdir()
+        stage.rename(target)
+    finally:
+        if stage.exists():
+            shutil.rmtree(stage)
+    return target
 
 
 def init_git(root, remote=''):
@@ -163,8 +240,7 @@ def init_git(root, remote=''):
         git_run(root, 'init', '-b', 'main')
     git_run(root, 'lfs', 'install', '--local')
     if remote:
-        if not remote.startswith('https://github.com/') or '@' in remote:
-            raise ValueError('仓库地址必须为不含凭据的 https://github.com/账号/仓库.git。')
+        remote=shared_url(remote)
         remotes = git_run(root, 'remote').splitlines()
         if 'origin' in remotes:
             if git_run(root, 'remote', 'get-url', 'origin').rstrip('/') != remote.rstrip('/'):
@@ -174,10 +250,12 @@ def init_git(root, remote=''):
     return 'Git LFS 已初始化。'
 
 
-def sync_git(root, operation):
+def sync_git(root, operation, remote=''):
     root = Path(root)
     if not (root / '.git').exists():
         raise ValueError('请先初始化 Git。')
+    if remote and git_run(root,'remote','get-url','origin').rstrip('/').casefold().removesuffix('.git')!=shared_url(remote).casefold().removesuffix('.git'):
+        raise ValueError('填写的共享仓库与当前目录的 origin 不同。请连接另一个空目录。')
     if operation == 'pull':
         if git_run(root, 'status', '--porcelain'):
             raise ValueError('本地有未提交内容，请先保存并推送，或在 Git 客户端处理后拉取。')
@@ -186,6 +264,8 @@ def sync_git(root, operation):
         return '拉取完成。'
     if operation != 'push':
         raise ValueError('未知 Git 操作。')
+    if any((root/'.git'/name).exists() for name in ('rebase-merge','rebase-apply','MERGE_HEAD','CHERRY_PICK_HEAD')):
+        raise ValueError('请先在 Git 客户端完成正在进行的合并或变基。')
     git_run(root, 'lfs', 'version')
     staged=git_run(root,'diff','--cached','--name-only').splitlines()
     if any(name not in ('library.json','.gitattributes','.gitignore') and not name.startswith('characters/') for name in staged):
@@ -195,5 +275,15 @@ def sync_git(root, operation):
     git_run(root, 'add', '--', *paths)
     if git_run(root, 'diff', '--cached', '--name-only'):
         git_run(root, 'commit', '-m', 'Save animation library assets')
+    git_run(root, 'fetch', 'origin')
+    if git_run(root,'branch','-r','--list','origin/main'):
+        try:
+            git_run(root,'rebase','origin/main')
+        except RuntimeError as exc:
+            try:
+                git_run(root,'rebase','--abort')
+            except RuntimeError:
+                raise exc
+            raise ValueError('共享库有冲突，本地提交已保留。请在 Git 客户端处理冲突后重试。') from exc
     git_run(root, 'push', '-u', 'origin', 'main')
     return '已推送到 GitHub。'

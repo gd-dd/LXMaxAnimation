@@ -52,8 +52,24 @@ def digest(path):
 
 
 class Library:
-    def __init__(self, root):
+    def __init__(self, root, actor=None):
         self.root = Path(root).resolve()
+        self.actor = actor or (lambda: None)
+
+    def stamp(self, record, *, created=False):
+        identity = self.actor()
+        if created:
+            record['createdBy'] = identity
+        record.update(updatedAt=datetime.now(timezone.utc).isoformat(), updatedBy=identity)
+        return record
+
+    def set_notes(self, asset, notes):
+        path = contained(self.root, Path(asset['_directory']).relative_to(self.root)) / 'asset.json'
+        record = read_json(path)
+        if record['id'] != asset['id']:
+            raise ValueError('版本已变化，请关闭详情后重新打开。')
+        if notes != record.get('notes', ''):
+            write_json(path, self.stamp(dict(record, notes=notes)))
 
     def initialize(self):
         self.root.mkdir(parents=True, exist_ok=True)
@@ -82,6 +98,34 @@ class Library:
         folder.mkdir(parents=True, exist_ok=False)
         write_json(folder / 'character.json', {'schema': 1, 'name': name})
 
+    def version_parent(self, character, kind, name):
+        category = self.root / 'characters' / character / kind
+        versions, _ = self.list_assets(character, kind=kind)
+        for entry in versions:
+            folder = Path(entry['_directory'])
+            if entry['name'].casefold() != name.casefold():
+                continue
+            if entry['name'] != name:
+                raise ValueError('已有同名资产，请使用资产列表中的名称。')
+            if folder.parent.name == 'versions' and folder.parent.parent.parent == category:
+                return folder.parent
+        group = category / name
+        if (group / 'asset.json').is_file():
+            raise ValueError('资产名称与旧版目录冲突，请使用不同的名称。')
+        if any(Path(entry['_directory']).parent == group / 'versions' for entry in versions):
+            raise ValueError('该名称的目录仍有其他资产使用，请使用不同的名称。')
+        return group / 'versions'
+
+    def asset_location(self, asset):
+        relative = Path(asset['_directory']).relative_to(self.root)
+        folder = contained(self.root, relative)
+        if not (folder / 'asset.json').is_file() or read_json(folder / 'asset.json')['id'] != asset['id']:
+            raise ValueError('版本已移动或删除，请刷新资产列表。')
+        category = self.root / 'characters' / safe_name(asset['character']) / asset['kind']
+        if folder.parent.name == 'versions' and folder.parent.parent.parent == category:
+            return folder.parent.parent, folder
+        return folder, folder
+
     def create_asset(self, character, name, kind, new_character=False):
         character,name=safe_name(character),safe_name(name)
         if kind not in KINDS:
@@ -97,10 +141,12 @@ class Library:
                 raise ValueError('已存在同名同类资产，或角色索引需要修复。')
         revision=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')+'-'+uuid.uuid4().hex[:8]
         role=contained(self.root,'characters/'+character)
-        relative=Path(kind)/(name+'--'+revision)
+        relative=(Path(kind)/name/'versions'/revision if new_character
+                  else (self.version_parent(character,kind,name)/revision).relative_to(role))
         folder=role/relative
         data=dict(schema=1,id=uuid.uuid4().hex,character=character,name=name,kind=kind,revision=revision,
                   created=datetime.now(timezone.utc).isoformat(),main='',notes='',files={},metadata={},placeholder=True)
+        self.stamp(data,created=True)
         if new_character:
             stage=self.stage()
             try:
@@ -119,7 +165,11 @@ class Library:
             candidates,errors=self.list_assets(previous['character'],kind=kind)
             if errors or any(a['name'].casefold()==previous['name'].casefold() for a in candidates):
                 raise ValueError('目标类型中已有同名资产，请选择该资产保存。')
-        asset=self.publish(previous['character'],previous['name'],kind,source,main,previous.get('notes',''),metadata)
+        origin=previous
+        if not previous.get('assetCreatedAt'):
+            history,_=self.list_assets(previous['character'],kind=previous['kind'])
+            origin=next((item for item in reversed(history) if item['name']==previous['name']),previous)
+        asset=self.publish(previous['character'],previous['name'],kind,source,main,previous.get('notes',''),metadata,origin=origin)
         folder=Path(asset['_directory'])
         try:
             if previous.get('placeholder'):
@@ -170,7 +220,8 @@ class Library:
             raise ValueError('资产回收目录路径无效。')
         sources=[Path(item['_directory']) for item in selected]
         expected=self.root/'characters'/character/kind
-        if any(path.resolve()!=path or path.parent!=expected for path in sources):
+        if any(path.resolve()!=path or not (path.parent==expected or
+               (path.parent.name=='versions' and path.parent.parent.parent==expected)) for path in sources):
             raise ValueError('资产版本目录路径无效。')
         batch=archive/(uuid.uuid4().hex+'-'+character)
         batch.mkdir(parents=True)
@@ -191,7 +242,7 @@ class Library:
         result, errors = [], []
         for name in ([safe_name(character)] if character else self.characters()):
             folder = contained(self.root, 'characters/' + name)
-            for meta in folder.glob('*/*/asset.json'):
+            for meta in (*folder.glob('*/*/asset.json'), *folder.glob('*/*/versions/*/asset.json')):
                 try:
                     contained(self.root, meta.relative_to(self.root))
                     data = read_json(meta)
@@ -209,7 +260,7 @@ class Library:
         path.mkdir(parents=True)
         return path
 
-    def publish(self, character, name, kind, source, main, notes='', metadata=None):
+    def publish(self, character, name, kind, source, main, notes='', metadata=None, *, origin=None):
         character, name = safe_name(character), safe_name(name)
         if character not in self.characters() or kind not in KINDS:
             raise ValueError('请先创建角色并选择资产类型。')
@@ -222,7 +273,7 @@ class Library:
         if kind == 'pose' and main_path.name != 'source.max' and read_json(main_path).get('schema') != 1:
             raise ValueError('Pose 文件格式不正确。')
         revision = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:8]
-        destination = contained(self.root, f'characters/{character}/{kind}/{name}--{revision}')
+        destination = contained(self.root, self.version_parent(character,kind,name)/revision)
         staging = self.stage()
         try:
             files = {}
@@ -238,6 +289,10 @@ class Library:
             data = {'schema': 1, 'id': uuid.uuid4().hex, 'character': character, 'name': name,
                     'kind': kind, 'revision': revision, 'created': datetime.now(timezone.utc).isoformat(),
                     'main': Path(main).as_posix(), 'notes': notes, 'files': files, 'metadata': metadata or {}}
+            self.stamp(data,created=True)
+            if origin:
+                data['assetCreatedAt']=origin.get('assetCreatedAt', origin['created'])
+                data['assetCreatedBy']=origin.get('assetCreatedBy', origin.get('createdBy'))
             write_json(staging / 'asset.json', data)
             destination.parent.mkdir(parents=True, exist_ok=True)
             staging.rename(destination)

@@ -1,9 +1,11 @@
+from datetime import datetime
 from pathlib import Path
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon,QImage
 from PySide6.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QLineEdit,QComboBox,
-    QCheckBox,QFormLayout,QDialogButtonBox,QListWidget,QListWidgetItem,QFileDialog,QInputDialog,QMessageBox,QToolButton,QMenu)
-from .library import safe_name,contained
+    QCheckBox,QFormLayout,QDialogButtonBox,QListWidget,QListWidgetItem,QFileDialog,QInputDialog,QMessageBox,QToolButton,QMenu,QTreeWidget,QTreeWidgetItem,QPlainTextEdit)
+from .library import safe_name,contained,KINDS
+from . import integrations as host
 
 
 class CreateAssetDialog(QDialog):
@@ -119,3 +121,184 @@ class CharacterDialog(QDialog):
         output=self.panel.context.data_root/'avatar-upload.png';output.parent.mkdir(parents=True,exist_ok=True)
         if not image.scaled(256,256,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation).save(str(output)):raise ValueError('头像转换失败。')
         self.panel.library.set_avatar(name,output);self.refresh();self.panel.update_character_header()
+
+class AssetDetailsDialog(QDialog):
+    def __init__(self,panel,asset):
+        super().__init__(panel)
+        self.panel=panel
+        self.asset=asset
+        self.changed=False
+        self.drafts={}
+        self.history={}
+        self.setWindowTitle('详情信息 · '+asset['name'])
+        self.resize(760,620)
+        layout=QVBoxLayout(self)
+        layout.addWidget(QLabel(asset['character']+' / '+asset['name']+' · '+KINDS[asset['kind']]))
+        self.versions=QTreeWidget()
+        self.versions.setRootIsDecorated(False)
+        self.versions.setHeaderLabels(['版本','保存时间','保存者'])
+        self.versions.setColumnWidth(0,130)
+        self.versions.setColumnWidth(1,205)
+        self.versions.currentItemChanged.connect(self.show_version)
+        layout.addWidget(self.versions,2)
+        self.provenance=QLabel()
+        self.provenance.setWordWrap(True)
+        self.provenance.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.provenance)
+        layout.addWidget(QLabel('版本备注'))
+        self.notes=QPlainTextEdit()
+        self.notes.setFixedHeight(76)
+        self.notes.textChanged.connect(self.track_draft)
+        layout.addWidget(self.notes)
+        row=QHBoxLayout()
+        self.save=self.button('保存备注',self.save_notes)
+        self.reveal=self.button('打开版本目录',lambda:self.panel.reveal_asset(self.selected(),version=True))
+        self.remove=self.button('删除所选版本…',self.delete_version)
+        self.remove_all=self.button('删除全部版本…',lambda:self.delete_version(True))
+        for button in (self.save,self.reveal,self.remove,self.remove_all):
+            row.addWidget(button)
+        row.addStretch()
+        close=QPushButton('关闭')
+        close.clicked.connect(self.accept)
+        row.addWidget(close)
+        layout.addLayout(row)
+        layout.addWidget(QLabel('Git 提交记录'))
+        self.commits=QPlainTextEdit()
+        self.commits.setReadOnly(True)
+        layout.addWidget(self.commits,2)
+        self.reload(asset['id'])
+
+    def button(self,text,action):
+        button=QPushButton(text,self)
+        button.clicked.connect(lambda _:self.panel.guard(action))
+        return button
+
+    @staticmethod
+    def time(value):
+        if not value:
+            return '时间未知'
+        try:
+            return datetime.fromisoformat(value.replace('Z','+00:00')).astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')
+        except ValueError:
+            return value
+
+    def reload(self,selected=None):
+        assets,errors=self.panel.library.list_assets(self.asset['character'],kind=self.asset['kind'])
+        entries=[row for row in assets if row['name']==self.asset['name']]
+        self.versions.blockSignals(True)
+        try:
+            self.versions.clear()
+            for index,entry in enumerate(entries):
+                tag=f'v{len(entries)-index:03d}'+(' · 最新' if not index else '')
+                if entry.get('placeholder'):
+                    tag+=' · 空'
+                item=QTreeWidgetItem([tag,self.time(entry.get('created')),entry.get('createdBy') or '未记录'])
+                item.setData(0,Qt.ItemDataRole.UserRole,entry)
+                item.setToolTip(0,entry['revision'])
+                self.versions.addTopLevelItem(item)
+                if entry['id']==selected:
+                    self.versions.setCurrentItem(item)
+            if entries and self.versions.currentItem() is None:
+                self.versions.setCurrentItem(self.versions.topLevelItem(0))
+        finally:
+            self.versions.blockSignals(False)
+        self.origin=entries[-1] if entries else None
+        self.show_version(self.versions.currentItem())
+        if errors:
+            self.panel.set_status('索引异常：'+' · '.join(errors))
+
+    def show_version(self,item,*_):
+        asset=item.data(0,Qt.ItemDataRole.UserRole) if item else None
+        for widget in (self.notes,self.save,self.reveal,self.remove,self.remove_all):
+            widget.setEnabled(asset is not None)
+        self.notes.blockSignals(True)
+        self.notes.setPlainText(self.drafts.get(asset['id'],asset.get('notes','')) if asset else '')
+        self.notes.blockSignals(False)
+        if not asset:
+            self.provenance.setText('没有可用版本。')
+            self.commits.clear()
+            return
+        try:
+            history=self.commits_for(asset)
+            if history:
+                lines=[]
+                for sha,author,author_time,committer,commit_time,message in history:
+                    lines.append(f'{sha[:10]}  {message}\n作者 {author} · {self.time(author_time)}\n提交者 {committer} · {self.time(commit_time)}')
+                self.commits.setPlainText('\n\n'.join(lines))
+            else:
+                self.commits.setPlainText('暂无 Git 提交。共享库推送后可在这里查看。')
+        except Exception as error:
+            history=[]
+            self.commits.setPlainText('无法读取 Git 提交记录。'+str(error))
+        origin=self.origin
+        creator=asset.get('assetCreatedBy') or origin.get('assetCreatedBy') or origin.get('createdBy')
+        version_author=asset.get('createdBy') or (history[-1][1] if history else None)
+        if not creator:
+            if origin['id']==asset['id']:
+                creator=version_author
+            else:
+                try:
+                    created_history=self.commits_for(origin)
+                    if created_history:creator=created_history[-1][1]
+                except (OSError,ValueError,RuntimeError):
+                    pass
+        created=asset.get('assetCreatedAt') or origin.get('assetCreatedAt') or origin.get('created')
+        updated,update_time=asset.get('updatedBy'),asset.get('updatedAt')
+        if history:
+            author,committed=history[0][1:3]
+            try:
+                use_git=not update_time or datetime.fromisoformat(committed)>datetime.fromisoformat(update_time)
+            except (TypeError,ValueError):
+                use_git=not update_time
+            if use_git:updated,update_time=author,committed
+        update_time=update_time or asset.get('created')
+        self.provenance.setText(
+            f"资产创建  {creator or '未记录'} · {self.time(created)}\n"
+            f"版本保存  {version_author or '未记录'} · {self.time(asset.get('created'))}\n"
+            f"最近修改  {updated or '未记录'} · {self.time(update_time)}")
+
+    def commits_for(self,asset):
+        if asset['id'] not in self.history:
+            self.history[asset['id']]=host.asset_history(self.panel.library.root,asset)
+        return self.history[asset['id']]
+
+    def track_draft(self):
+        asset=self.selected()
+        text=self.notes.toPlainText()
+        if text==asset.get('notes',''):
+            self.drafts.pop(asset['id'],None)
+        else:
+            self.drafts[asset['id']]=text
+
+    def done(self,result):
+        if self.drafts and QMessageBox.question(self,'版本备注','关闭详情并丢弃尚未保存的备注？')!=QMessageBox.StandardButton.Yes:
+            return
+        super().done(result)
+
+    def selected(self):
+        item=self.versions.currentItem()
+        if item is None:
+            raise ValueError('请选择一个版本。')
+        return item.data(0,Qt.ItemDataRole.UserRole)
+
+    def save_notes(self):
+        self.panel.idle()
+        asset=self.selected()
+        self.panel.library.set_notes(asset,self.notes.toPlainText())
+        self.drafts.pop(asset['id'],None)
+        self.changed=True
+        self.reload(asset['id'])
+        self.panel.set_status('版本备注已保存。')
+
+    def delete_version(self,all_versions=False):
+        self.panel.idle()
+        asset=self.selected()
+        subject='全部版本' if all_versions else self.versions.currentItem().text(0)
+        if QMessageBox.question(self,'删除资产版本',f'将「{asset["name"]}」的{subject}移入回收目录？')!=QMessageBox.StandardButton.Yes:
+            return
+        count=self.panel.library.delete_asset(asset,all_versions)
+        if all_versions:self.drafts.clear()
+        else:self.drafts.pop(asset['id'],None)
+        self.changed=True
+        self.reload()
+        self.panel.set_status(f'已将 {count} 个资产版本移入回收目录。')

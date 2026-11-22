@@ -12,7 +12,7 @@ class ClipEditor(QWidget):
     def __init__(self,parent=None):
         super().__init__(parent);self.setObjectName('ClipWorkspace')
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,True)
-        self.library=self.asset=self.data=None;self.current_id=None;self.loading=False;self.clip_selection={};self.recovery={}
+        self.library=self.asset=self.data=self.loaded_data=None;self.current_id=None;self.loading=False;self.clip_selection={};self.recovery={}
         layout=QVBoxLayout(self);layout.setContentsMargins(10,8,10,8);layout.setSpacing(7)
         row=QHBoxLayout();self.title=ElidedLabel('Clip 拆分');self.title.setStyleSheet('font-size:16px;font-weight:600');row.addWidget(self.title,1)
         self.add_button=add=QPushButton('＋ Clip');add.clicked.connect(lambda:self.guard(self.add_clip));row.addWidget(add)
@@ -107,7 +107,10 @@ class ClipEditor(QWidget):
 
     def flush(self):
         if self.data is None:return
-        self.commit_current();clips.save(self.library,self.asset,self.data)
+        self.commit_current()
+        if self.data!=self.loaded_data:
+            clips.save(self.library,self.asset,self.data)
+            self.loaded_data=copy.deepcopy(self.data)
         self.recovery.pop(self.recovery_key(),None)
         self.message.emit('配置已保存。')
 
@@ -120,12 +123,13 @@ class ClipEditor(QWidget):
 
     def set_asset(self,library,asset):
         if self.asset:self.clip_selection[self.asset['id']]=self.current_id
-        self.library,self.asset=library,asset;self.current_id=None;self.data=None
+        self.library,self.asset=library,asset;self.current_id=None;self.data=self.loaded_data=None
         self.loading=True;self.table.clear();self.loading=False
         error=''
         if asset and asset['kind']=='animation' and not asset.get('placeholder'):
             try:
                 self.data=clips.load(library,asset)
+                self.loaded_data=copy.deepcopy(self.data)
             except (OSError,ValueError) as exc:
                 error=str(exc)
         active=self.data is not None
