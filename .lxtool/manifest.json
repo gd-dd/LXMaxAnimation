@@ -3,7 +3,7 @@
   "kind": "lx-tool",
   "name": "LXMaxAnimation",
   "description": "连接 Max，以 T-pose 管理角色、完整动画场景和 Pose，编辑独立 Clip 配置。",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "category": "动画管线",
   "icon": ".lxtool/icon.png",
   "readme": ".lxtool/README.md",
@@ -18,7 +18,7 @@
     "ui/max_connection.py": "6bd5c516144bd2f3b6fb5aeda7ef33f2c2204b2cb723a34d53f7ddd4edc86e3c",
     "ui/library.py": "4a67993765748083f8562b936857ff6345c24159a3ab8a36c1229fdcd397be00",
     "ui/integrations.py": "20d5b95090df54691ea1f23c17e0d30d0a33dd5eb3d9ed912869f763cb7c47e9",
-    "ui/panel.py": "9fd389f53e4f55f1f9c90a006f492bf6e586d91b87ae505c5b734005323a5db1",
+    "ui/panel.py": "dda823d6e224ea9969bf969f86d36ba38c8df6e91195b96f9f98d099b083bacc",
     "ui/clips.py": "834a201ffb12269e18600b2a81b9eb445317aaa4575a4895ab309e0e183cfebf",
     "ui/clip_editor.py": "83fa66c4f82124192aa7cbdc7378cb423b9d2f806fb62a66c42a69126bf016f6",
     "ui/dialogs.py": "eec9e34b095906cbefe948f08202e8edda8669164e80162fdf9212387485ba36",
@@ -31,6 +31,6 @@
     "max/bridge.py": "3ee632a6b6874040d65143435a75657a09e94c57cd9d67718de0761f6512dcc1",
     "max/auto_connect.ms": "be9b55b4c38dc5c2c46e962f5639cbc0495bd0b56f7ad0026856f2501947e3f9"
   },
-  "releaseNotes": "资产详情支持查看版本、创建与修改记录、Git 作者和提交者、版本备注及历史版本删除。团队成员可连接同一 GitHub 共享资产库并同步变更。 新存资产按角色、类型、可读资产名和版本分目录，可从资源管理器定位。",
+  "releaseNotes": "LXGit 与 LXMaxAnimation 共用本地 Git 资产库，支持双向打开与文件版本操作。完整联动需 LXTools 0.0.10 或更高版本。",
   "publishedAt": "2026-11-22"
 }

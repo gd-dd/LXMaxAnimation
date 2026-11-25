@@ -98,6 +98,8 @@ class Panel(QWidget):
         more=QToolButton();more.setText('更多');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
         menu.addAction('资产库 / 同步',lambda:self.guard(self.library_settings));menu.addSeparator()
         for title,fn in [('切换 Max 窗口',self.connect_max),('断开连接',self.disconnect),('更换 Max 程序',self.choose_max_program)]:menu.addAction(title,lambda fn=fn:self.guard(fn))
+        if callable(getattr(context,'workspace_state',{}).get('installed_tool_setting')):
+            menu.addAction('在 LXGit 管理资产库',lambda:self.guard(self.open_library_in_git))
         more.setMenu(menu);row.addWidget(more);outer.addLayout(row)
         connection_row=QHBoxLayout()
         self.connection=ElidedLabel('尚未连接 Max')
@@ -661,6 +663,33 @@ class Panel(QWidget):
         self.auto_reconnect=False
         self.launching={'process':process,'pid':process.pid,'time':time.time()};self.persist()
         self.set_status('正在启动 Max，就绪后会自动连接该窗口…')
+
+    def open_library_in_git(self):
+        self.idle()
+        root=self.require_library().root
+        marker=root/'.git'
+        if not (marker.is_dir() or marker.is_file()):
+            raise ValueError('请先在共享库设置中连接本地 Git 资产库。')
+        self.editor.flush()
+        target=self.context.workspace_state['open_tool']('repo-1432888469')
+        select=getattr(target,'open_animation_library',None)
+        if callable(select):
+            select()
+        elif target is not None:
+            self.set_status('请将 LXGit 更新到支持动画资产库联动的版本。')
+
+    def refresh_linked_library(self):
+        self.idle()
+        self.editor.flush()
+        library=self.require_library()
+        names=library.characters()
+        if self.active_character not in names:
+            self.active_character=names[0] if names else None
+            self.editor.set_asset(None,None)
+        self.update_character_header()
+        self.refresh_assets(flush=False)
+        if self.gallery:self.gallery.reload_categories()
+        self.persist()
 
     def library_settings(self):
         self.idle();self.editor.flush();dialog=QDialog(self);dialog.setWindowTitle('资产库与同步');dialog.resize(650,200);form=QFormLayout(dialog)
