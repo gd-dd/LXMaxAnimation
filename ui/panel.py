@@ -1,4 +1,5 @@
 """LXTool embedded character and animation workspace; no standalone application."""
+from datetime import datetime
 from pathlib import Path
 import os
 import shutil
@@ -6,12 +7,12 @@ import time
 from PySide6.QtCore import Qt,QTimer,QThread,Signal,QSize
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QLabel,QPushButton,QLineEdit,QTreeWidget,QTreeWidgetItem,
-    QComboBox,QSpinBox,QFileDialog,QSplitter,QHeaderView,QTabBar,QSizePolicy,QLayout,QDialog,QDialogButtonBox,QFormLayout,QMessageBox,QInputDialog,QToolButton,QMenu,QApplication)
+    QComboBox,QSpinBox,QFileDialog,QSplitter,QHeaderView,QTabBar,QSizePolicy,QLayout,QDialog,QDialogButtonBox,QFormLayout,QMessageBox,QInputDialog,QToolButton,QMenu,QApplication,QFrame,QBoxLayout)
 from .library import Library,KINDS,read_json,contained
 from . import integrations as host
 from . import max_connection
 from .clip_editor import ClipEditor
-from .dialogs import AssetDetailsDialog,CharacterDialog,CreateAssetDialog
+from .dialogs import AssetDetailsDialog,CharacterDialog,CreateAssetDialog,LibrarySyncDialog
 from .widgets import WheelRouter,AssetTree,ElidedLabel
 
 
@@ -96,21 +97,20 @@ class Panel(QWidget):
         row.addWidget(self.button('角色库',self.open_gallery))
         self.connect_button=self.button('连接 Max',self.start_max);row.addWidget(self.connect_button)
         more=QToolButton();more.setText('更多');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
-        menu.addAction('资产库 / 同步',lambda:self.guard(self.library_settings));menu.addSeparator()
         for title,fn in [('切换 Max 窗口',self.connect_max),('断开连接',self.disconnect),('更换 Max 程序',self.choose_max_program)]:menu.addAction(title,lambda fn=fn:self.guard(fn))
-        if callable(getattr(context,'workspace_state',{}).get('installed_tool_setting')):
-            menu.addAction('在 LXGit 管理资产库',lambda:self.guard(self.open_library_in_git))
-        more.setMenu(menu);row.addWidget(more);outer.addLayout(row)
+        more.setMenu(menu);row.addWidget(more)
+        self.register_character=self.button('创建角色',lambda:self.create_asset(new_character=True))
+        row.addWidget(self.register_character)
+        outer.addLayout(row)
         connection_row=QHBoxLayout()
         self.connection=ElidedLabel('尚未连接 Max')
         connection_row.addWidget(self.connection,1)
         self.editing_asset=self.settings.get('editingAsset')
         self.editing_label=ElidedLabel('当前编辑：未绑定资产')
-        self.register_character=self.button('创建角色',lambda:self.create_asset(new_character=True))
         self.editing_label.setStyleSheet("color:#526747;font-weight:600;")
         connection_row.addWidget(self.editing_label,1)
-        connection_row.addWidget(self.register_character)
         outer.addLayout(connection_row)
+        outer.addWidget(self.library_controls())
         self.narrow_tabs=QTabBar();self.narrow_tabs.addTab('资产浏览');self.narrow_tabs.addTab('资产 / Clip 编辑');self.narrow_tabs.setExpanding(True)
         self.narrow_tabs.currentChanged.connect(self.update_workspace);outer.addWidget(self.narrow_tabs);self.narrow_tabs.hide()
         self.split=QSplitter();self.split.setHandleWidth(8);outer.addWidget(self.split,1)
@@ -190,6 +190,7 @@ class Panel(QWidget):
         self.narrow_tabs.setVisible(narrow)
         self.left.setVisible(not narrow or self.narrow_tabs.currentIndex()==0)
         self.right.setVisible(not narrow or self.narrow_tabs.currentIndex()==1)
+        self.update_library_layout()
 
     def button(self,title,fn):
         b=QPushButton(title);b.clicked.connect(lambda _:self.guard(fn));return b
@@ -237,6 +238,12 @@ class Panel(QWidget):
         names=self.library.characters();previous=self.settings.get('character')
         self.active_character=previous if previous in names else (names[0] if names else None)
         self.editor.set_asset(None,None);self.update_character_header();self.refresh_assets(flush=False);self.persist()
+        self.library_state=None
+        self.library_last_cloud=None
+        self.library_feedback=''
+        self.update_library_controls()
+        if (self.library.root/'.git').exists():
+            self.library_action('local')
     def update_character_header(self):
         icon=self.context.resource('.lxtool/icon.png');self.character_title.setText(self.active_character or '选择一个角色')
         if self.active_character:
@@ -664,6 +671,202 @@ class Panel(QWidget):
         self.launching={'process':process,'pid':process.pid,'time':time.time()};self.persist()
         self.set_status('正在启动 Max，就绪后会自动连接该窗口…')
 
+    def library_controls(self):
+        self.library_state=None
+        self.library_working=False
+        self.library_feedback=''
+        self.library_last_cloud=None
+        section=QFrame()
+        section.setStyleSheet('QFrame#librarySync {background:#f5f8ef;border:1px solid #d6e2c9;border-radius:7px;}')
+        section.setObjectName('librarySync')
+        layout=QBoxLayout(QBoxLayout.Direction.LeftToRight,section)
+        self.library_bar_layout=layout
+        layout.setContentsMargins(8,4,8,4)
+        layout.setSpacing(6)
+        header=QHBoxLayout()
+        header.setSpacing(4)
+        title=QLabel('共享资产库')
+        title.setStyleSheet('font-weight:650;color:#3c5334;')
+        header.addWidget(title)
+        self.library_summary=ElidedLabel('正在读取本地库')
+        header.addWidget(self.library_summary,1)
+        self.library_refresh=self.button('刷新',lambda:self.library_action('refresh'))
+        self.library_refresh.setToolTip('重新读取本地资产与 Git 状态，并检查云端更新')
+        header.addWidget(self.library_refresh)
+        self.library_details=self.button('详情',self.open_library_sync)
+        header.addWidget(self.library_details)
+        workspace=getattr(self.context,'workspace_state',{})
+        self.library_git=self.button('LXGit',self.open_library_in_git)
+        self.library_git.setToolTip('在 LXGit 中打开同一个本地资产库')
+        self.library_git.setVisible(callable(workspace.get('open_tool')))
+        header.addWidget(self.library_git)
+        layout.addLayout(header,1)
+        row=QHBoxLayout()
+        row.setSpacing(4)
+        self.library_pull=self.button('拉取更新',lambda:self.library_action('pull'))
+        self.library_push=self.button('提交推送',lambda:self.library_action('push'))
+        self.library_overwrite=self.button('云端覆盖',lambda:self.library_action('overwrite'))
+        self.library_restore=self.button('还原…',lambda:self.library_action('history'))
+        for button in (self.library_pull,self.library_push,self.library_overwrite,self.library_restore):
+            row.addWidget(button,1)
+        self.library_setup=self.button('连接共享库…',self.library_settings)
+        row.addWidget(self.library_setup,1)
+        layout.addLayout(row)
+        return section
+
+    def update_library_layout(self):
+        linked=bool((self.library_state or {}).get('remote'))
+        stacked=linked and self.width()<650
+        self.library_bar_layout.setDirection(QBoxLayout.Direction.TopToBottom if stacked
+                                             else QBoxLayout.Direction.LeftToRight)
+
+    def update_library_controls(self):
+        data=self.library_state or {}
+        linked=bool(data.get('remote'))
+        root=self.library.root if self.library else None
+        is_git=bool(root and (root/'.git').exists())
+        ready=not self.library_working and data.get('branch')=='main' and not data.get('blocked')
+        dirty,ahead,behind=len(data.get('dirty',[])),data.get('ahead',0),data.get('behind',0)
+        if self.library_working:
+            summary=self.library_feedback
+        elif data.get('blocked'):
+            summary='Git 操作待处理 · 打开 LXGit 查看'
+        elif data.get('branch') not in (None,'main'):
+            summary=f"当前分支 {data['branch'] or '游离'} · 同步使用 main"
+        elif linked:
+            cloud=f'云端更新 {behind}' if data.get('checked') else '云端未检查'
+            summary=f'本地改动 {dirty} · 待推送 {ahead} · {cloud}'
+        else:
+            summary='本地库 · 尚未连接云端' if self.library_state or not is_git else '本地库 · 请刷新 Git 状态'
+        self.library_summary.setText(summary)
+        self.update_library_layout()
+        extra=self.library_feedback
+        if self.library_last_cloud:
+            extra=f'{extra}\n云端检查 {self.library_last_cloud}'.strip()
+        self.library_summary.setToolTip('\n'.join((summary,str(root or ''),extra)).strip())
+        self.library_refresh.setEnabled(bool(root and not self.library_working))
+        self.library_details.setEnabled(bool(root and not self.library_working))
+        self.library_git.setEnabled(is_git and not self.library_working)
+        self.library_setup.setVisible(not linked)
+        self.library_setup.setEnabled(bool(root and not self.library_working))
+        for button in (self.library_pull,self.library_push,self.library_overwrite):
+            button.setVisible(linked)
+        self.library_restore.setVisible(is_git)
+        self.library_pull.setEnabled(bool(ready and linked and not dirty and not ahead))
+        self.library_push.setEnabled(bool(ready and linked))
+        self.library_overwrite.setEnabled(bool(ready and linked and data.get('has_head')))
+        self.library_restore.setEnabled(bool(ready and data.get('has_head')))
+        self.library_pull.setToolTip('快速更新到云端版本。工作区需干净，且没有待推送的提交。')
+        self.library_overwrite.setToolTip('使用云端 main 覆盖本地资产库。先备份本地提交及工作区。')
+        self.library_restore.setToolTip('还原未提交改动，或选择历史提交创建反向提交')
+
+    def library_action(self,operation,commit=None):
+        self.idle()
+        library=self.require_library()
+        root=library.root
+        changes={'pull','push','overwrite','restore','revert'}
+        workspace=getattr(self.context,'workspace_state',{})
+        if workspace.get('lxgit_working_root')==str(root):
+            raise ValueError('LXGit 正在操作此资产库，完成后再刷新。')
+        if operation!='local':
+            self.editor.flush()
+        confirmations={
+            'push':('提交推送','提交并推送本地资产库的改动？其他成员拉取后会收到新增、修改和删除。'),
+            'overwrite':('云端覆盖本地库','用云端 main 覆盖本地资产库？本地提交和未提交的改动会先备份，可在 LXGit 找回。当前 Max 场景保持原位。'),
+            'restore':('还原未提交改动','将本地库还原到最近的本地提交？未提交的改动会先存入 LXGit 储藏。'),
+            'revert':('反向提交','撤销所选提交的改动并创建一条本地反向提交？确认后可另行推送给团队。'),
+        }
+        if operation in confirmations:
+            title,question=confirmations[operation]
+            if QMessageBox.question(self,title,question,QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
+                                    QMessageBox.StandardButton.No)!=QMessageBox.StandardButton.Yes:
+                return
+        labels={'local':'正在读取本地状态…','refresh':'正在刷新本地和云端状态…','history':'正在读取可还原的提交…',
+                'pull':'正在拉取云端更新…','push':'正在提交并推送…','overwrite':'正在备份并覆盖本地库…',
+                'restore':'正在备份并还原本地改动…','revert':'正在创建反向提交…'}
+        label=labels[operation]
+        if operation in changes:
+            workspace['animation_working_root']=str(root)
+        self.library_working=True
+        self.library_feedback=label
+        self.update_library_controls()
+        locks_editor=operation in changes or operation=='refresh'
+        if locks_editor:
+            self.split.setEnabled(False)
+            self.register_character.setEnabled(False)
+        def work():
+            try:
+                message=host.sync_git(root,operation,commit=commit) if operation in changes else ''
+                data=host.library_sync_state(root,check_cloud=operation=='refresh')
+                history=host.library_commits(root) if operation=='history' and data.get('has_head') else []
+                return data,message,history,True
+            except Exception as error:
+                try:data=host.library_sync_state(root)
+                except Exception:data=None
+                return data,'操作失败：'+str(error),[],False
+            finally:
+                if operation in changes and workspace.get('animation_working_root')==str(root):
+                    workspace.pop('animation_working_root',None)
+        def ready(result):
+            data,message,history,ok=result
+            self.library_working=False
+            if locks_editor:
+                self.split.setEnabled(True)
+                self.register_character.setEnabled(True)
+            self.library_state=data
+            self.library_feedback=message or ('刷新完成。' if operation=='refresh' else '')
+            if ok and operation in ('refresh','pull','push','overwrite') and data and data.get('remote'):
+                self.library_last_cloud=datetime.now().strftime('%m-%d %H:%M')
+            self.update_library_controls()
+            if operation in changes or operation=='refresh':
+                self.reload_library_assets()
+            if ok and message:
+                self.settings['lastLibrarySync']=dict(library=str(root),time=datetime.now().strftime('%m-%d %H:%M'),message=message)
+                self.persist()
+            self.set_status(self.library_feedback or '共享资产库状态已读取。')
+            if operation=='history' and ok:
+                QTimer.singleShot(0,lambda:self.guard(lambda:self.choose_library_revert(data,history)) if not self.closed else None)
+        try:
+            self.run_job(work,label,ready)
+        except Exception:
+            workspace.pop('animation_working_root',None)
+            self.library_working=False
+            if locks_editor:
+                self.split.setEnabled(True)
+                self.register_character.setEnabled(True)
+            self.update_library_controls()
+            raise
+
+    def choose_library_revert(self,data,history):
+        dialog=QDialog(self)
+        dialog.setWindowTitle('还原资产库')
+        dialog.resize(560,220)
+        layout=QVBoxLayout(dialog)
+        text=QLabel('还原未提交的改动，或选择一条历史提交，创建一条反向提交。')
+        text.setWordWrap(True);layout.addWidget(text)
+        restore=self.button('还原未提交改动…',lambda:dialog.done(2))
+        restore.setEnabled(bool(data['dirty']))
+        layout.addWidget(restore)
+        layout.addWidget(QLabel('历史提交'))
+        picker=QComboBox()
+        for sha,date,author,subject in history:
+            picker.addItem(f'{date} · {author} · {subject} · {sha[:8]}',sha)
+        layout.addWidget(picker)
+        row=QHBoxLayout()
+        row.addStretch()
+        row.addWidget(self.button('关闭',dialog.reject))
+        revert=self.button('创建反向提交…',dialog.accept)
+        revert.setEnabled(bool(history) and not data['dirty'])
+        row.addWidget(revert)
+        layout.addLayout(row)
+        selection=dialog.exec()
+        if selection==2:self.library_action('restore')
+        if selection==QDialog.DialogCode.Accepted:self.library_action('revert',picker.currentData())
+
+    def open_library_sync(self):
+        self.idle()
+        LibrarySyncDialog(self).exec()
+
     def open_library_in_git(self):
         self.idle()
         root=self.require_library().root
@@ -679,20 +882,26 @@ class Panel(QWidget):
             self.set_status('请将 LXGit 更新到支持动画资产库联动的版本。')
 
     def refresh_linked_library(self):
-        self.idle()
-        self.editor.flush()
+        self.library_action('refresh')
+
+    def reload_library_assets(self):
         library=self.require_library()
         names=library.characters()
         if self.active_character not in names:
             self.active_character=names[0] if names else None
             self.editor.set_asset(None,None)
+        binding=self.editing_asset or {}
+        if binding.get('library')==str(library.root) and binding.get('directory'):
+            marker=Path(binding['directory'])/'asset.json'
+            if not marker.is_file() or read_json(marker).get('id')!=binding.get('id'):
+                self.editing_asset=None
         self.update_character_header()
         self.refresh_assets(flush=False)
         if self.gallery:self.gallery.reload_categories()
         self.persist()
 
     def library_settings(self):
-        self.idle();self.editor.flush();dialog=QDialog(self);dialog.setWindowTitle('资产库与同步');dialog.resize(650,200);form=QFormLayout(dialog)
+        self.idle();self.editor.flush();dialog=QDialog(self);dialog.setWindowTitle('共享库设置');dialog.resize(650,200);form=QFormLayout(dialog)
         row=QHBoxLayout();path=QLineEdit(str(self.library.root) if self.library else '');row.addWidget(path,1)
         def browse():
             value=QFileDialog.getExistingDirectory(dialog,'选择资产库',path.text())
@@ -703,12 +912,16 @@ class Panel(QWidget):
         def apply():
             self.settings['remote']=remote.text().strip();self.load_library(path.text());dialog.accept()
         form.addRow(self.button('应用目录',apply));row=QHBoxLayout()
-        def sync(operation):
+        def connect_existing():
             if Path(path.text()).resolve()!=self.library.root:raise ValueError('请先应用目录。')
-            address=remote.text().strip()
-            self.settings['remote']=address;self.persist();dialog.accept();library=self.library
-            fn=(lambda:host.init_git(library.root,address)) if operation=='init' else (lambda:host.sync_git(library.root,operation,address))
-            self.run_job(fn,'正在同步资产库…',lambda message:(self.refresh_assets(),self.set_status(message)))
+            address=host.shared_url(remote.text().strip())
+            library=self.library
+            dialog.accept()
+            def ready(message):
+                self.settings['remote']=address
+                self.persist()
+                QTimer.singleShot(0,lambda:self.guard(lambda:self.library_action('local')))
+            self.run_job(lambda:host.init_git(library.root,address),'正在为当前库设置共享仓库…',ready)
         def join_shared():
             target=Path(path.text().strip())
             address=host.shared_url(remote.text().strip())
@@ -720,7 +933,7 @@ class Panel(QWidget):
                 self.set_status('已连接共享资产库。')
             self.run_job(lambda:host.clone_shared_library(target,address),'正在连接共享资产库…',ready)
         row.addWidget(self.button('连接共享库',join_shared))
-        for title,operation in [('初始化 Git LFS','init'),('拉取','pull'),('保存并推送','push')]:row.addWidget(self.button(title,lambda operation=operation:sync(operation)))
+        row.addWidget(self.button('为当前库设置仓库',connect_existing))
         form.addRow(row);dialog.exec()
     def remember_max_target(self, session):
         state=getattr(self.context,'workspace_state',None)
@@ -801,8 +1014,9 @@ class Panel(QWidget):
     def shutdown(self):
         if self.closed:return
         if self.attach:self.attach.close();self.attach=None
-        try:self.editor.flush()
-        except Exception:self.editor.keep_draft()
+        if not self.library_working:
+            try:self.editor.flush()
+            except Exception:self.editor.keep_draft()
         from .library import write_json
         write_json(self.context.data_root/'clip-drafts.json',self.editor.recovery)
         self.closed=True;self.timer.stop();self.wheel_router.stop()

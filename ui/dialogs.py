@@ -1,9 +1,10 @@
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon,QImage
 from PySide6.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QLineEdit,QComboBox,
-    QCheckBox,QFormLayout,QDialogButtonBox,QListWidget,QListWidgetItem,QFileDialog,QInputDialog,QMessageBox,QToolButton,QMenu,QTreeWidget,QTreeWidgetItem,QPlainTextEdit)
+    QCheckBox,QFormLayout,QDialogButtonBox,QListWidget,QListWidgetItem,QFileDialog,QInputDialog,QMessageBox,QToolButton,QMenu,QTreeWidget,QTreeWidgetItem,QPlainTextEdit,QTabWidget,QHeaderView)
 from .library import safe_name,contained,KINDS
 from . import integrations as host
 
@@ -302,3 +303,55 @@ class AssetDetailsDialog(QDialog):
         self.changed=True
         self.reload()
         self.panel.set_status(f'已将 {count} 个资产版本移入回收目录。')
+
+class LibrarySyncDialog(QDialog):
+    def __init__(self,panel):
+        super().__init__(panel)
+        self.setWindowTitle('共享资产库详情')
+        self.resize(700,490)
+        layout=QVBoxLayout(self)
+        library=panel.require_library()
+        self.state=panel.library_state or {}
+        remote=self.state.get('remote')
+        source=urlsplit(remote) if remote else None
+        address=source.hostname+source.path if source and source.hostname else '已连接共享仓库' if remote else '尚未连接'
+        cloud=panel.library_last_cloud or ('最近获取的记录' if self.state.get('checked') else '尚未刷新')
+        messages=[f'本地目录  {library.root}',f'云端  {address} · {cloud}']
+        last=panel.settings.get('lastLibrarySync',{})
+        if last.get('library')==str(library.root):
+            messages.append(f"上次操作  {last['time']} · {last['message']}")
+        if panel.library_feedback:
+            messages.append(panel.library_feedback)
+        for text in messages:
+            label=QLabel(text)
+            label.setTextFormat(Qt.TextFormat.PlainText)
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            layout.addWidget(label)
+        self.tabs=QTabWidget()
+        self.tables={}
+        for key,title,count,unit in (
+                ('dirty','本地改动',len(self.state.get('dirty',[])),'项'),
+                ('outgoing','待推送',self.state.get('ahead',0),'个提交'),
+                ('incoming','云端更新',self.state.get('behind',0),'个提交')):
+            table=QTreeWidget()
+            table.setRootIsDecorated(False)
+            table.setHeaderLabels(['变更','资产库中的路径'])
+            table.header().setSectionResizeMode(0,QHeaderView.ResizeMode.ResizeToContents)
+            for code,path in self.state.get(key,[]):
+                label={'A':'新增','M':'修改','D':'删除','R':'移动','C':'复制','?':'新增','U':'冲突'}.get(code[:1],code)
+                item=QTreeWidgetItem([label,path])
+                item.setToolTip(1,path)
+                table.addTopLevelItem(item)
+            self.tables[key]=table
+            self.tabs.addTab(table,f'{title} · {count} {unit}')
+        layout.addWidget(self.tabs,1)
+        row=QHBoxLayout()
+        def goto(action):
+            self.accept()
+            panel.guard(action)
+        row.addWidget(panel.button('共享设置…',lambda:goto(panel.library_settings)))
+        row.addWidget(panel.button('刷新',lambda:goto(lambda:panel.library_action('refresh'))))
+        row.addStretch()
+        row.addWidget(panel.button('关闭',self.reject))
+        layout.addLayout(row)

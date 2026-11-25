@@ -14,7 +14,7 @@ class ClipEditor(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,True)
         self.library=self.asset=self.data=self.loaded_data=None;self.current_id=None;self.loading=False;self.clip_selection={};self.recovery={}
         layout=QVBoxLayout(self);layout.setContentsMargins(10,8,10,8);layout.setSpacing(7)
-        row=QHBoxLayout();self.title=ElidedLabel('Clip 拆分');self.title.setStyleSheet('font-size:16px;font-weight:600');row.addWidget(self.title,1)
+        row=QHBoxLayout();self.title_row=row;self.title=ElidedLabel('Clip 拆分');self.title.setStyleSheet('font-size:16px;font-weight:600');row.addWidget(self.title,1)
         self.add_button=add=QPushButton('＋ Clip');add.clicked.connect(lambda:self.guard(self.add_clip));row.addWidget(add)
         self.more_button=more=QToolButton();more.setText('更多');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
         for title,fn in [('复制当前 Clip',self.duplicate),('移除当前 Clip',self.remove)]:menu.addAction(title,lambda fn=fn:self.guard(fn))
@@ -34,7 +34,7 @@ class ClipEditor(QWidget):
         self.table.header().setToolTip("拖动表头分隔线，调整分隔线左侧的列")
         self.table.setColumnHidden(4,True);self.table.setColumnHidden(5,True)
         self.table.currentItemChanged.connect(self.select_clip);self.table.itemChanged.connect(self.edit_cell);layout.addWidget(self.table,1)
-        row=QHBoxLayout();self.advanced_toggle=QToolButton();self.advanced_toggle.setText('FBX / Clip 高级配置');self.advanced_toggle.setCheckable(True)
+        row=QHBoxLayout();self.controls_row=row;self.advanced_toggle=QToolButton();self.advanced_toggle.setText('FBX / Clip 高级配置');self.advanced_toggle.setCheckable(True)
         self.advanced_toggle.setArrowType(Qt.ArrowType.RightArrow);self.advanced_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         row.addWidget(self.advanced_toggle);row.addStretch(1)
         self.save_config=QPushButton('保存配置');self.save_config.clicked.connect(lambda:self.guard(self.flush));row.addWidget(self.save_config);layout.addLayout(row)
@@ -52,6 +52,10 @@ class ClipEditor(QWidget):
         self.setEnabled(False)
 
     def toggle_advanced(self,opened):
+        source=self.title_row if opened else self.controls_row
+        target=self.controls_row if opened else self.title_row
+        source.removeWidget(self.title)
+        target.insertWidget(1 if opened else 0,self.title,1)
         self.advanced.setVisible(opened)
         self.table.setVisible(not opened);self.source.setVisible(not opened)
         self.add_button.setVisible(not opened);self.more_button.setVisible(not opened)

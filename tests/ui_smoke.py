@@ -218,7 +218,32 @@ with tempfile.TemporaryDirectory() as temp:
     with patch.object(AssetDetailsDialog,'exec',exercise_details),patch('ui.panel.QMenu',DetailsMenu):
         area=panel.assets.visualItemRect(panel.assets.currentItem())
         panel.assets.customContextMenuRequested.emit(area.center())
-    assert actions==['details'] and panel.selected_asset()['id']==newer['id']
+    assert actions==['details'] and panel.selected_asset()['id']==newer['id'], (actions,panel.status.text(),area)
     assert not Path(older['_directory']).exists()
+    from ui.dialogs import LibrarySyncDialog
+    from ui import integrations
+    state=dict(ready=True,remote='https://github.com/example/shared.git',dirty=[('M','characters/角色/animation/待机/asset.json')],
+               outgoing=[],incoming=[('A','characters/角色/animation/走路/asset.json')],ahead=0,behind=1,checked=True,
+               branch='main',has_head=True,has_cloud=True)
+    with (patch.object(panel,'run_job',side_effect=lambda work,label,done:done(work())),
+          patch.object(integrations,'library_sync_state',return_value=state) as read_state):
+        panel.library_refresh.click()
+        read_state.assert_called_once_with(panel.library.root,check_cloud=True)
+        assert '云端更新 1' in panel.library_summary.text()
+        assert panel.library_push.isEnabled() and not panel.library_pull.isEnabled()
+        assert panel.library_overwrite.isEnabled() and panel.library_restore.isEnabled()
+        with patch.object(integrations,'sync_git') as sync_git:
+            from PySide6.QtWidgets import QMessageBox
+            with patch.object(QMessageBox,'question',return_value=QMessageBox.StandardButton.No):
+                panel.library_overwrite.click()
+                sync_git.assert_not_called()
+        detail=LibrarySyncDialog(panel)
+        assert detail.tables['dirty'].topLevelItemCount()==1 and detail.tables['incoming'].topLevelItemCount()==1
+        detail.grab().save(str(output/'shared-sync.png'))
+        detail.close()
+        read_state.return_value=dict(state,dirty=[])
+        panel.library_refresh.click()
+        assert panel.library_pull.isEnabled()
+        shell.grab().save(str(output/'shared-main.png'))
     panel.shutdown();panel.shutdown();shell.close()
 print('UI passed: embedded widget, sorting/search, role category gallery, independent clip settings, validation and persistence')
