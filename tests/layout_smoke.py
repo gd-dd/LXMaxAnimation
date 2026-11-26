@@ -161,7 +161,7 @@ def main():
             assert panel.character_title.toolTip() == role
             assert panel.selection_label.toolTip() == name
             item = find_asset(animation['id'])
-            assert item.toolTip(0) == name and item.toolTip(3) == '长备注_' * 35
+            assert item.toolTip(0) == name and item.toolTip(4) == '长备注_' * 35
             assert panel.editor.title.toolTip() == '当前 Clip：第二段动作'
         check('long-names-have-full-tooltips', long_names)
         check('column-border-drags-the-labelled-column',column_drag)

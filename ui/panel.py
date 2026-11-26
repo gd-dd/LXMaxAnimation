@@ -5,7 +5,7 @@ import os
 import shutil
 import time
 from PySide6.QtCore import Qt,QTimer,QThread,Signal,QSize
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap,QColor
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QLabel,QPushButton,QLineEdit,QTreeWidget,QTreeWidgetItem,
     QComboBox,QSpinBox,QFileDialog,QSplitter,QHeaderView,QTabBar,QSizePolicy,QLayout,QDialog,QDialogButtonBox,QFormLayout,QMessageBox,QInputDialog,QToolButton,QMenu,QApplication,QFrame,QBoxLayout)
 from .library import Library,KINDS,read_json,contained
@@ -14,6 +14,9 @@ from . import max_connection
 from .clip_editor import ClipEditor
 from .dialogs import AssetDetailsDialog,CharacterDialog,CreateAssetDialog,LibrarySyncDialog
 from .widgets import WheelRouter,AssetTree,ElidedLabel
+from .asset_git_status import asset_git_state,asset_paths,asset_status
+from .asset_git_push import push_asset
+from .git_access import access_state,describe_git_error
 
 
 class Job(QThread):
@@ -126,13 +129,13 @@ class Panel(QWidget):
         self.version_choice.setMaximumWidth(110)
         row.addWidget(self.version_choice)
         leftbox.addLayout(row)
-        self.assets=AssetTree();self.assets.setAlternatingRowColors(True);self.assets.setHeaderLabels(['名称','类型','版本数','备注']);self.assets.setRootIsDecorated(False);self.assets.setSortingEnabled(True);self.assets.sortItems(0,Qt.SortOrder.AscendingOrder)
+        self.assets=AssetTree();self.assets.setAlternatingRowColors(True);self.assets.setHeaderLabels(['名称','类型','版本','状态','备注']);self.assets.setRootIsDecorated(False);self.assets.setSortingEnabled(True);self.assets.sortItems(0,Qt.SortOrder.AscendingOrder)
         self.assets.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.assets.header().setCascadingSectionResizes(False)
         self.assets.header().setStretchLastSection(True)
         self.assets.header().setToolTip("拖动表头分隔线，调整分隔线左侧的列")
-        self.assets.setColumnWidth(0,125)
-        self.assets.setColumnWidth(1,72);self.assets.setColumnWidth(2,58)
+        self.assets.setColumnWidth(0,104)
+        self.assets.setColumnWidth(1,60);self.assets.setColumnWidth(2,48);self.assets.setColumnWidth(3,104)
         self.assets.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.assets.customContextMenuRequested.connect(self.asset_menu)
         self.assets.currentItemChanged.connect(self.asset_changed)
@@ -140,12 +143,19 @@ class Panel(QWidget):
         management=QHBoxLayout()
         self.create_asset_button=self.button('创建资产',self.create_asset)
         management.addWidget(self.create_asset_button)
+        self.push_asset_button=self.button('推送此动画',self.push_selected_animation)
+        self.push_asset_button.setVisible(False)
+        management.addWidget(self.push_asset_button)
         leftbox.addLayout(management)
         self.split.addWidget(left)
         self.right=right=QWidget();right.setMinimumWidth(340);rightbox=QVBoxLayout(right);rightbox.setContentsMargins(4,4,0,0)
         self.selection_label=ElidedLabel('未选择资产');self.selection_label.setStyleSheet('font-size:15px;font-weight:650')
         selection=QHBoxLayout();selection.addWidget(self.selection_label,3)
         self.asset_summary=ElidedLabel('从资产列表选择一项');selection.addWidget(self.asset_summary,2)
+        self.selected_asset_status=ElidedLabel()
+        self.selected_asset_status.setMinimumWidth(76)
+        self.selected_asset_status.setStyleSheet('color:#50723d;font-weight:600;')
+        selection.addWidget(self.selected_asset_status,1)
         rightbox.addLayout(selection)
         row=QHBoxLayout()
         self.save_button=self.button('保存修改',self.save_changes)
@@ -163,7 +173,13 @@ class Panel(QWidget):
         delete_menu.addAction('删除全部版本',lambda:self.guard(lambda:self.delete_asset(True)))
         self.delete_asset_button.setMenu(delete_menu)
         management.addWidget(self.delete_asset_button)
-        self.editor=ClipEditor();self.editor.message.connect(self.set_status);rightbox.addWidget(self.editor,1)
+        self.asset_scan=QTimer(self)
+        self.asset_scan.setSingleShot(True)
+        self.asset_scan.timeout.connect(lambda:self.guard(self.scan_asset_status))
+        self.editor=ClipEditor()
+        self.editor.message.connect(self.set_status)
+        self.editor.written.connect(self.schedule_asset_scan)
+        rightbox.addWidget(self.editor,1)
         self.split.addWidget(right);self.split.setSizes([300,700]);self.split.setStretchFactor(0,1);self.split.setStretchFactor(1,2);self.split.setChildrenCollapsible(False)
         self.status=ElidedLabel('先创建角色和资产，再连接 Max 保存修改。');outer.addWidget(self.status)
         draft_path=context.data_root/'clip-drafts.json'
@@ -196,7 +212,7 @@ class Panel(QWidget):
         b=QPushButton(title);b.clicked.connect(lambda _:self.guard(fn));return b
     def guard(self,fn):
         try:return fn()
-        except Exception as exc:self.set_status('操作失败：'+str(exc))
+        except Exception as exc:self.set_status('操作失败：'+describe_git_error(exc))
     def set_status(self,text):
         if not self.closed:self.status.setText(str(text))
     def busy(self):return self.pending is not None or self.launching is not None or any(j.isRunning() for j in self.jobs)
@@ -211,7 +227,7 @@ class Panel(QWidget):
         self.set_status(label);job=Job(fn,self);self.jobs.append(job)
         def completed(value,error):
             if self.closed:return
-            if error:self.set_status('操作失败：'+error)
+            if error:self.set_status('操作失败：'+describe_git_error(error))
             elif done:self.guard(lambda:done(value))
             else:self.set_status(str(value))
         job.done.connect(completed);job.start()
@@ -235,6 +251,7 @@ class Panel(QWidget):
         return self.version_choice.currentData() or item.data(0,Qt.ItemDataRole.UserRole)
     def load_library(self,path):
         self.editor.flush();self.library=Library(path,lambda:host.git_identity(Path(path).resolve()));self.library.initialize()
+        self.asset_sync_data=None if (self.library.root/'.git').exists() else {}
         names=self.library.characters();previous=self.settings.get('character')
         self.active_character=previous if previous in names else (names[0] if names else None)
         self.editor.set_asset(None,None);self.update_character_header();self.refresh_assets(flush=False);self.persist()
@@ -292,8 +309,9 @@ class Panel(QWidget):
                 continue
             for number,version in enumerate(reversed(versions),1):
                 version['_displayVersion']=number
-            item=QTreeWidgetItem([name,KINDS[kind],str(len(versions)),latest.get('notes','')])
-            item.setToolTip(0,name);item.setToolTip(3,latest.get('notes',''))
+            item=QTreeWidgetItem([name,KINDS[kind],str(len(versions)),'',latest.get('notes','')])
+            item.setToolTip(0,name);item.setToolTip(4,latest.get('notes',''))
+            self.mark_asset_item(item,versions)
             item.setData(0,Qt.ItemDataRole.UserRole,latest)
             item.setData(0,Qt.ItemDataRole.UserRole+1,versions)
             item.setFlags(item.flags()|Qt.ItemFlag.ItemIsEditable)
@@ -307,12 +325,84 @@ class Panel(QWidget):
         self.restoring=False
         self.load_asset_versions(chosen,chosen_version)
         if errors:self.set_status('索引异常：'+'; '.join(errors))
+    def mark_asset_item(self,item,versions):
+        try:
+            state=asset_status(self.asset_sync_data,asset_paths(self.library.root,versions))
+        except ValueError as error:
+            state={'text':'路径异常','detail':str(error),'code':'conflict'}
+        color={'latest':'#4b7438','behind':'#956026','modified':'#365b94','ahead':'#365b94',
+               'conflict':'#a3303b','diverged':'#a3303b'}.get(state['code'],'#657465')
+        item.setText(3,state['text'])
+        item.setForeground(3,QColor(color))
+        item.setToolTip(3,state['detail'])
+
+    def update_asset_marks(self):
+        was_restoring=self.restoring
+        self.restoring=True
+        try:
+            for index in range(self.assets.topLevelItemCount()):
+                item=self.assets.topLevelItem(index)
+                self.mark_asset_item(item,item.data(0,Qt.ItemDataRole.UserRole+1) or ())
+        finally:
+            self.restoring=was_restoring
+        self.update_version_marks()
+
+    def update_version_marks(self):
+        if not self.library:
+            return
+        for index in range(self.version_choice.count()):
+            asset=self.version_choice.itemData(index)
+            try:
+                state=asset_status(self.asset_sync_data,asset_paths(self.library.root,[asset],exact=True),
+                                   historical=index!=0)
+            except ValueError:
+                continue
+            self.version_choice.setItemData(index,state['detail'],Qt.ItemDataRole.ToolTipRole)
+        selected=self.version_choice.currentData()
+        if selected:
+            try:
+                state=asset_status(self.asset_sync_data,asset_paths(self.library.root,[selected],exact=True),
+                                   historical=self.version_choice.currentIndex()!=0)
+                self.selected_asset_status.setText(state['text'])
+                self.selected_asset_status.setToolTip(state['detail'])
+            except ValueError:
+                self.selected_asset_status.clear()
+        else:
+            self.selected_asset_status.clear()
+
+    def schedule_asset_scan(self):
+        if self.library and (self.library.root/'.git').exists():
+            self.asset_scan.start(420)
+
+    def scan_asset_status(self):
+        if self.closed or not self.library:
+            return
+        workspace=getattr(self.context,'workspace_state',{})
+        if self.busy() or self.library_working or workspace.get('lxgit_working_root')==str(self.library.root):
+            self.asset_scan.start(1000)
+            return
+        self.library_action('asset_status')
+
+    def push_selected_animation(self):
+        item=self.assets.currentItem()
+        if item:
+            self.push_animation_item(item)
+
+    def push_animation_item(self,item):
+        asset=item.data(0,Qt.ItemDataRole.UserRole)
+        if asset['kind']!='animation':
+            return
+        self.library_action('push_asset',asset=asset)
+
     def asset_menu(self,position):
         item=self.assets.itemAt(position)
         if not item:
             return
         menu=QMenu(self.assets)
         menu.addAction('详情信息…',lambda:self.guard(lambda:self.open_asset_details(item)))
+        asset=item.data(0,Qt.ItemDataRole.UserRole)
+        if asset['kind']=='animation' and (self.library_state or {}).get('remote'):
+            menu.addAction('推送此动画…',lambda:self.guard(lambda:self.push_animation_item(item)))
         menu.addAction('打开资产目录',lambda:self.guard(lambda:self.reveal_asset(
             self.selected_asset() if item is self.assets.currentItem() else item.data(0,Qt.ItemDataRole.UserRole))))
         menu.exec(self.assets.viewport().mapToGlobal(position))
@@ -334,6 +424,7 @@ class Panel(QWidget):
             self.refresh_assets(flush=False,select_id=selected)
             self.persist()
             if self.gallery:self.gallery.refresh()
+            self.schedule_asset_scan()
 
     def asset_changed(self,item,old):
         if self.restoring:return
@@ -349,7 +440,7 @@ class Panel(QWidget):
         try:
             self.version_choice.clear()
             for index,asset in enumerate(versions):
-                suffix=' · 最新' if index==0 else ''
+                suffix=' · 最新' if index==0 else ' · 旧版本'
                 self.version_choice.addItem(f"v{asset['_displayVersion']:03d}{suffix}",asset)
                 self.version_choice.setItemData(index,asset['revision'],Qt.ItemDataRole.ToolTipRole)
             if versions:self.version_choice.setCurrentIndex(0)
@@ -435,6 +526,7 @@ class Panel(QWidget):
         if self.narrow_tabs.isVisible():self.narrow_tabs.setCurrentIndex(1)
         self.persist()
         self.set_status('已创建空资产，可在 Max 准备场景后保存修改。')
+        self.schedule_asset_scan()
 
     def save_changes(self):
         self.idle()
@@ -514,6 +606,7 @@ class Panel(QWidget):
         self.persist()
         if self.gallery:self.gallery.refresh()
         self.set_status(f'已将 {count} 个资产版本移入回收目录。')
+        self.schedule_asset_scan()
 
     def key_selected_asset(self):
         asset=self.selected_asset()
@@ -598,9 +691,20 @@ class Panel(QWidget):
             self.asset_summary.setText(detail+(' · '+asset.get('notes','') if asset.get('notes') else ''))
         else:self.asset_summary.setText('从资产列表选择一项')
         self.selection_label.setToolTip(asset['name'] if asset else '')
+        self.update_version_marks()
+        self.update_push_asset_button()
+
+    def update_push_asset_button(self):
+        selected=self.version_choice.currentData()
+        eligible=bool(selected and selected['kind']=='animation' and (self.library_state or {}).get('remote'))
+        self.push_asset_button.setVisible(eligible)
+        self.push_asset_button.setEnabled(eligible and not self.library_working
+                                         and self.library_state.get('branch')=='main'
+                                         and not self.library_state.get('blocked'))
+        self.push_asset_button.setToolTip('推送这条动画的所有本地版本、场景和配置。')
 
     def asset_metadata_changed(self,item,column):
-        if self.restoring or column not in (0,3):return
+        if self.restoring or column not in (0,4):return
         asset=item.data(0,Qt.ItemDataRole.UserRole)
         if not asset:return
         try:
@@ -640,6 +744,7 @@ class Panel(QWidget):
             if item==self.assets.currentItem():
                 self.load_asset_versions(item,self.selected_asset())
             self.set_status('资产信息已保存。')
+            self.schedule_asset_scan()
         except Exception as exc:
             self.restoring=True;item.setText(column,asset['name' if column==0 else 'notes']);self.restoring=False
             self.set_status('修改未保存：'+str(exc))
@@ -673,6 +778,7 @@ class Panel(QWidget):
 
     def library_controls(self):
         self.library_state=None
+        self.asset_sync_data=None
         self.library_working=False
         self.library_feedback=''
         self.library_last_cloud=None
@@ -695,6 +801,9 @@ class Panel(QWidget):
         header.addWidget(self.library_refresh)
         self.library_details=self.button('详情',self.open_library_sync)
         header.addWidget(self.library_details)
+        self.library_account=self.button('账号',self.open_git_access)
+        self.library_account.setToolTip('查看 Git 提交身份与 GitHub 账号权限')
+        header.addWidget(self.library_account)
         workspace=getattr(self.context,'workspace_state',{})
         self.library_git=self.button('LXGit',self.open_library_in_git)
         self.library_git.setToolTip('在 LXGit 中打开同一个本地资产库')
@@ -746,6 +855,8 @@ class Panel(QWidget):
         self.library_summary.setToolTip('\n'.join((summary,str(root or ''),extra)).strip())
         self.library_refresh.setEnabled(bool(root and not self.library_working))
         self.library_details.setEnabled(bool(root and not self.library_working))
+        self.library_account.setEnabled(is_git and not self.library_working)
+        self.update_push_asset_button()
         self.library_git.setEnabled(is_git and not self.library_working)
         self.library_setup.setVisible(not linked)
         self.library_setup.setEnabled(bool(root and not self.library_working))
@@ -760,15 +871,15 @@ class Panel(QWidget):
         self.library_overwrite.setToolTip('使用云端 main 覆盖本地资产库。先备份本地提交及工作区。')
         self.library_restore.setToolTip('还原未提交改动，或选择历史提交创建反向提交')
 
-    def library_action(self,operation,commit=None):
+    def library_action(self,operation,commit=None,asset=None):
         self.idle()
         library=self.require_library()
         root=library.root
-        changes={'pull','push','overwrite','restore','revert'}
+        changes={'pull','push','push_asset','overwrite','restore','revert'}
         workspace=getattr(self.context,'workspace_state',{})
         if workspace.get('lxgit_working_root')==str(root):
             raise ValueError('LXGit 正在操作此资产库，完成后再刷新。')
-        if operation!='local':
+        if operation not in ('local','asset_status'):
             self.editor.flush()
         confirmations={
             'push':('提交推送','提交并推送本地资产库的改动？其他成员拉取后会收到新增、修改和删除。'),
@@ -776,12 +887,14 @@ class Panel(QWidget):
             'restore':('还原未提交改动','将本地库还原到最近的本地提交？未提交的改动会先存入 LXGit 储藏。'),
             'revert':('反向提交','撤销所选提交的改动并创建一条本地反向提交？确认后可另行推送给团队。'),
         }
+        if operation=='push_asset':
+            confirmations[operation]=('推送此动画',f'提交并推送「{asset["name"]}」的本地改动和版本？')
         if operation in confirmations:
             title,question=confirmations[operation]
             if QMessageBox.question(self,title,question,QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
                                     QMessageBox.StandardButton.No)!=QMessageBox.StandardButton.Yes:
                 return
-        labels={'local':'正在读取本地状态…','refresh':'正在刷新本地和云端状态…','history':'正在读取可还原的提交…',
+        labels={'asset_status':'正在读取动画文件状态…','push_asset':'正在推送所选动画…','local':'正在读取本地状态…','refresh':'正在刷新本地和云端状态…','history':'正在读取可还原的提交…',
                 'pull':'正在拉取云端更新…','push':'正在提交并推送…','overwrite':'正在备份并覆盖本地库…',
                 'restore':'正在备份并还原本地改动…','revert':'正在创建反向提交…'}
         label=labels[operation]
@@ -795,32 +908,51 @@ class Panel(QWidget):
             self.split.setEnabled(False)
             self.register_character.setEnabled(False)
         def work():
+            message=''
+            success=True
             try:
-                message=host.sync_git(root,operation,commit=commit) if operation in changes else ''
+                if operation=='push_asset':
+                    message=push_asset(root,asset)
+                elif operation in changes:
+                    message=host.sync_git(root,operation,commit=commit)
                 data=host.library_sync_state(root,check_cloud=operation=='refresh')
-                history=host.library_commits(root) if operation=='history' and data.get('has_head') else []
-                return data,message,history,True
             except Exception as error:
+                message='操作失败：'+describe_git_error(error)
+                success=False
                 try:data=host.library_sync_state(root)
                 except Exception:data=None
-                return data,'操作失败：'+str(error),[],False
+            try:
+                asset_data=asset_git_state(root,data) if data is not None else None
+            except Exception as error:
+                asset_data=None
+                if not message:
+                    message='无法读取动画文件状态：'+describe_git_error(error)
+            try:
+                history=host.library_commits(root) if operation=='history' and data and data.get('has_head') else []
+            except Exception as error:
+                history=[]
+                success=False
+                message='操作失败：'+describe_git_error(error)
             finally:
                 if operation in changes and workspace.get('animation_working_root')==str(root):
                     workspace.pop('animation_working_root',None)
+            return data,message,history,success,asset_data
         def ready(result):
-            data,message,history,ok=result
+            data,message,history,ok,self.asset_sync_data=result
             self.library_working=False
             if locks_editor:
                 self.split.setEnabled(True)
                 self.register_character.setEnabled(True)
             self.library_state=data
             self.library_feedback=message or ('刷新完成。' if operation=='refresh' else '')
-            if ok and operation in ('refresh','pull','push','overwrite') and data and data.get('remote'):
+            if ok and operation in ('refresh','pull','push','push_asset','overwrite') and data and data.get('remote'):
                 self.library_last_cloud=datetime.now().strftime('%m-%d %H:%M')
             self.update_library_controls()
             if operation in changes or operation=='refresh':
                 self.reload_library_assets()
-            if ok and message:
+            else:
+                self.update_asset_marks()
+            if ok and message and operation in changes:
                 self.settings['lastLibrarySync']=dict(library=str(root),time=datetime.now().strftime('%m-%d %H:%M'),message=message)
                 self.persist()
             self.set_status(self.library_feedback or '共享资产库状态已读取。')
@@ -862,6 +994,71 @@ class Panel(QWidget):
         selection=dialog.exec()
         if selection==2:self.library_action('restore')
         if selection==QDialog.DialogCode.Accepted:self.library_action('revert',picker.currentData())
+
+    def open_git_access(self):
+        self.idle()
+        root=self.require_library().root
+        dialog=QDialog(self)
+        dialog.setWindowTitle('Git 账号与权限')
+        dialog.resize(560,330)
+        layout=QVBoxLayout(dialog)
+        info=QLabel('正在读取本地 Git 设置…')
+        info.setTextFormat(Qt.TextFormat.PlainText)
+        info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        info.setWordWrap(True)
+        layout.addWidget(info,1)
+        row=QHBoxLayout()
+        def read_access(verify):
+            self.idle()
+            check.setEnabled(False);identity.setEnabled(False);close.setEnabled(False);lxgit.setEnabled(False)
+            info.setText('正在核验 GitHub 账号与仓库权限…' if verify else '正在读取本地 Git 设置…')
+            def worker():
+                try:return access_state(root,verify=verify),None
+                except Exception as error:return None,describe_git_error(error)
+            def ready(value):
+                state,error=value
+                if state:
+                    show=lambda value:('有权限' if value is True else '无权限' if value is False else '待核验')
+                    identity_text=' · '.join(filter(None,(state.get('identity_name'),state.get('identity_email'))))
+                    lines=[f"提交者  {identity_text or '尚未设置姓名和邮箱'}",
+                           f"GitHub 账号  {state.get('account') or '待核验'}",
+                           f"凭据助手  {'已配置' if state.get('helper_configured') else '未配置'}",
+                           f"远端  {state.get('remote') or '尚未连接'}",
+                           f"仓库权限  读取 {show(state.get('read_access'))} · 写入 {show(state.get('write_access'))}",
+                           state.get('message','')]
+                    if state.get('push_remote') not in ('',None,state.get('remote')):
+                        lines.insert(4,f"推送地址  {state['push_remote']}")
+                    info.setText(chr(10).join(lines))
+                else:
+                    info.setText(error)
+                check.setEnabled(True);identity.setEnabled(True);close.setEnabled(True);lxgit.setEnabled(True)
+            self.run_job(worker,'正在读取 Git 账号信息…',ready)
+        def edit_identity():
+            name,ok=QInputDialog.getText(dialog,'设置提交者','显示姓名')
+            if not ok or not name.strip():return
+            email,ok=QInputDialog.getText(dialog,'设置提交者','提交者邮箱')
+            if not ok:return
+            if '@' not in email or not email.strip():
+                info.setText('请填写有效的提交者邮箱。')
+                return
+            host.git_run(root,'config','--local','user.name',name.strip(),timeout=8)
+            host.git_run(root,'config','--local','user.email',email.strip(),timeout=8)
+            read_access(False)
+        check=self.button('核验 GitHub 权限',lambda:read_access(True))
+        identity=self.button('设置提交者…',edit_identity)
+        def manage():
+            dialog.accept()
+            self.open_library_in_git()
+        lxgit=self.button('在 LXGit 管理账号',manage)
+        close=self.button('关闭',dialog.reject)
+        for button in (check,identity,lxgit,close):
+            row.addWidget(button)
+        layout.addLayout(row)
+        note=QLabel('工具架账号用于商店。共享资产库使用 Git 凭据，提交者姓名和邮箱用于版本记录。')
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        QTimer.singleShot(0,lambda:self.guard(lambda:read_access(False)) if dialog.isVisible() else None)
+        dialog.exec()
 
     def open_library_sync(self):
         self.idle()
@@ -1007,6 +1204,7 @@ class Panel(QWidget):
                     self.update_character_header();self.refresh_assets(flush=False,select_id=asset['id']);self.persist()
                     self.bind_asset(asset,pending['session'],pending['scene'])
                     if self.gallery:self.gallery.reload_categories()
+                    self.schedule_asset_scan()
                     self.set_status('已更新库。'+(' · '+'; '.join(result.get('warnings',[])) if result.get('warnings') else ''))
                 self.run_job(publish,'正在归档 Max 场景与配置…',finished)
             self.guard(consume)
@@ -1019,7 +1217,7 @@ class Panel(QWidget):
             except Exception:self.editor.keep_draft()
         from .library import write_json
         write_json(self.context.data_root/'clip-drafts.json',self.editor.recovery)
-        self.closed=True;self.timer.stop();self.wheel_router.stop()
+        self.closed=True;self.timer.stop();self.asset_scan.stop();self.wheel_router.stop()
         self.persist()
         if self.gallery:self.gallery.close()
         for job in self.jobs:

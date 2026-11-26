@@ -9,6 +9,7 @@ from .widgets import ColumnsDelegate,ElidedLabel
 
 class ClipEditor(QWidget):
     message=Signal(str)
+    written=Signal()
     def __init__(self,parent=None):
         super().__init__(parent);self.setObjectName('ClipWorkspace')
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,True)
@@ -83,7 +84,7 @@ class ClipEditor(QWidget):
         if not self.current():return
         self.commit_current()
         candidate=clips.apply_preset(self.data,self.asset,self.current_id,clips.presets(self.library)[self.preset.currentText()])
-        clips.save(self.library,self.asset,candidate);self.data=candidate;self.render_table(self.current_id)
+        clips.save(self.library,self.asset,candidate);self.written.emit();self.data=candidate;self.render_table(self.current_id)
         self.message.emit('已应用配置预设；所有 Clip 名称、分段和备注保持不变。')
 
     def store_preset(self):
@@ -114,6 +115,7 @@ class ClipEditor(QWidget):
         self.commit_current()
         if self.data!=self.loaded_data:
             clips.save(self.library,self.asset,self.data)
+            self.written.emit()
             self.loaded_data=copy.deepcopy(self.data)
         self.recovery.pop(self.recovery_key(),None)
         self.message.emit('配置已保存。')
@@ -186,7 +188,7 @@ class ClipEditor(QWidget):
             if column in (1,2):clip['firstFrame' if column==1 else 'lastFrame']=float(item.text(column))
             elif column==3:clip['settings']['loopTime']=item.checkState(3)==Qt.CheckState.Checked
             else:clip[{0:'name',4:'notes',5:'takeName'}[column]]=item.text(column).strip()
-            clips.save(self.library,self.asset,candidate);self.data=candidate;self.show_fields()
+            clips.save(self.library,self.asset,candidate);self.written.emit();self.data=candidate;self.show_fields()
             self.message.emit('Clip 已保存。')
         except Exception as exc:
             self.message.emit('修改未保存：'+str(exc));QTimer.singleShot(0,lambda:self.render_table(self.current_id,fields=False))
@@ -222,16 +224,17 @@ class ClipEditor(QWidget):
     def add_clip(self):
         self.commit_current();source=self.data['source']
         clip=clips.new_clip(self.unique_name('Clip'),source['firstFrame'],source['lastFrame']);self.data['clips'].append(clip)
-        clips.save(self.library,self.asset,self.data);self.render_table(clip['id'])
+        clips.save(self.library,self.asset,self.data);self.written.emit();self.render_table(clip['id'])
 
     def duplicate(self):
         self.commit_current()
         if not self.current():return
         clip=copy.deepcopy(self.current());clip['id']=uuid.uuid4().hex;clip['name']=self.unique_name(clip['name']+'_copy')
-        self.data['clips'].append(clip);clips.save(self.library,self.asset,self.data);self.render_table(clip['id'])
+        self.data['clips'].append(clip);clips.save(self.library,self.asset,self.data);self.written.emit();self.render_table(clip['id'])
 
     def remove(self):
         if not self.current():return
         self.data['clips']=[c for c in self.data['clips'] if c['id']!=self.current_id]
         clips.save(self.library,self.asset,self.data)
+        self.written.emit()
         self.render_table(self.data['clips'][0]['id'] if self.data['clips'] else None)

@@ -83,7 +83,7 @@ with tempfile.TemporaryDirectory() as temp:
     panel.editor.importer.controls['globalScale'].setValue(0.01);panel.editor.flush()
     assert clips.load(library,animation)['fbxSettings']['globalScale']==0.01
     # Inline metadata editing persists; double-click leaves the working scene alone.
-    asset_item=panel.assets.currentItem();asset_item.setText(3,'新的备注')
+    asset_item=panel.assets.currentItem();asset_item.setText(4,'新的备注')
     assert library.list_assets('测试角色','新的备注')[0][0]['id']==animation['id']
     loaded=[];panel.send_to_max=lambda asset,**options:loaded.append(asset['id'])
     rect=panel.assets.visualItemRect(asset_item);point=QPoint(rect.left()+20,rect.center().y())

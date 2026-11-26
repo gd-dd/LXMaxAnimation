@@ -168,7 +168,7 @@ def git_program():
     raise ValueError('找不到 Git。请先在 LXGit 中准备 Git，或安装 Git for Windows。')
 
 
-def git_run(root, *args, timeout=300, strip=True):
+def git_run(root, *args, timeout=300, strip=True, extra_env=None, input=None):
     env={**os.environ, 'GIT_TERMINAL_PROMPT':'0'}
     program=git_program()
     portable=Path(program).parent.parent
@@ -179,7 +179,9 @@ def git_run(root, *args, timeout=300, strip=True):
     for scheme,proxy in getproxies().items():
         if scheme in ('http','https') and proxy:
             env.setdefault(scheme.upper()+'_PROXY',proxy)
-    result = subprocess.run([program, '-C', str(root), *args], capture_output=True, text=True, encoding='utf-8', errors='replace',
+    if extra_env:
+        env.update(extra_env)
+    result = subprocess.run([program, '-C', str(root), *args], capture_output=True, text=True, encoding='utf-8', errors='replace', input=input,
                             timeout=timeout, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
                             env=env)
     if result.returncode:
