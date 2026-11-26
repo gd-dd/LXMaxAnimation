@@ -101,7 +101,7 @@ def matrix(value):
     return rt.matrix3(*(rt.point3(*row) for row in value))
 
 
-def rig_root(nodes, rig):
+def rig_roots(nodes, rig):
     roots={}
     for node in nodes:
         if rig=='CAT':
@@ -110,10 +110,15 @@ def rig_root(nodes, rig):
             root=node
             if 'biped' not in str(rt.classOf(node)).lower():continue
             while root.parent and 'biped' in str(rt.classOf(root.parent)).lower():root=root.parent
-        else:return None
         if root:roots[int(rt.getHandleByAnim(root))]=root
+    return list(roots.values())
+
+
+def rig_root(nodes, rig):
+    if rig not in ('Biped','CAT'):return None
+    roots=rig_roots(nodes,rig)
     if len(roots)!=1:raise ValueError('请选择且仅选择一个 '+rig+' 角色（根节点或骨骼）。')
-    return next(iter(roots.values()))
+    return roots[0]
 
 
 def pose_records(nodes):
@@ -273,11 +278,20 @@ def apply_animation(path,rig,start,end):
     return {'ok':True,'message':f'已将动画打键到 {start:g}–{end:g} 帧。'}
 
 
-def frame_node_type(node):
-    cls=str(rt.classOf(node)).casefold()
+def native_frame_type(cls):
     if 'biped' in cls:
         return 'Biped'
-    if cls=='catparent' or rt.isProperty(node.controller,'CATParent'):
+    if cls in ('catparent','catbone','hubobject'):
+        return 'CAT'
+    return None
+
+
+def frame_node_type(node):
+    cls=str(rt.classOf(node)).casefold()
+    native=native_frame_type(cls)
+    if native:
+        return native
+    if rt.isProperty(node.controller,'CATParent'):
         return 'CAT'
     if cls in ('bone','bonegeometry'):
         return 'bone'
@@ -289,6 +303,9 @@ def frame_receivers(records,signature,rig):
     for node in rt.objects:
         scene.setdefault(str(node.name).casefold(),[]).append(node)
     source={item['name']:item for item in signature}
+    required_rigs={native_frame_type(item['class'].casefold()) for name,item in source.items()
+                   if name in records and item['class'].casefold()!='catparent'}-{None}
+    matched_rigs=set()
     geometry=None
     matched,skipped={},[]
     for name,record in records.items():
@@ -303,10 +320,12 @@ def frame_receivers(records,signature,rig):
             skipped.append(f'{name}（父节点不匹配）')
             continue
         kind=frame_node_type(node)
-        if kind in ('Biped','CAT') and kind!=rig:
+        original=source.get(name,{})
+        # Older complete scenes used a single export label even for mixed rigs.
+        # Trust a matching per-node class before falling back to a legacy label.
+        if kind in ('Biped','CAT') and not original and kind!=rig:
             skipped.append(f'{name}（骨架类型不匹配）')
             continue
-        original=source.get(name,{})
         cls=str(rt.classOf(node)).casefold()
         source_class=original.get('class',cls).casefold()
         compatible=cls==source_class
@@ -318,16 +337,26 @@ def frame_receivers(records,signature,rig):
         if not compatible:
             skipped.append(f'{name}（节点类型不匹配）')
             continue
+        controller_class=str(rt.classOf(node.controller)).casefold()
+        if kind=='Biped' and controller_class=='footsteps':
+            skipped.append(f'{name}（Biped 步迹）')
+            continue
         if kind=='geometryclass':
             deforms={'skin','physique','skin_wrap','skin_morph'}
             modifiers={str(rt.classOf(modifier)).casefold() for modifier in node.modifiers}
             if deforms & (modifiers|{value.casefold() for value in original.get('modifiers',())}):
                 skipped.append(f'{name}（蒙皮模型）')
                 continue
-        if kind not in ('Biped','CAT') and str(rt.classOf(node.controller)).casefold()!='prs':
+        if kind not in ('Biped','CAT') and controller_class!='prs':
             skipped.append(f'{name}（变换控制器不支持）')
             continue
         matched[name]=(node,kind)
+        if kind in required_rigs and cls!='catparent':
+            matched_rigs.add(kind)
+    missing_rigs=required_rigs-matched_rigs
+    if missing_rigs:
+        names='、'.join(sorted(missing_rigs))
+        raise ValueError(f'当前场景没有与资产匹配的 {names} 骨架。请打开使用同一套骨架的角色场景。')
     # Max transforms are relative to their parent. Write parents before children.
     ordered={}
     def add(name):
@@ -460,8 +489,8 @@ def apply_asset_frames(args):
     if path.suffix.lower()!='.json' or not path.is_file():
         raise ValueError('此版本没有可应用的独立帧数据。')
     data=json.loads(path.read_text('utf-8-sig'))
-    rig=args.get('rig','Generic')
-    if data.get('schema')!=1 or rig not in ('Generic','Biped','CAT') or data.get('rig','Generic')!=rig:
+    rig=data.get('rig',args.get('rig','Generic'))
+    if data.get('schema')!=1 or rig not in ('Generic','Biped','CAT'):
         raise ValueError('帧数据格式或骨架类型不匹配。')
     frames=data.get('frames') if kind=='animation' else [data.get('nodes')]
     if not frames or not frames[0]:
@@ -484,11 +513,14 @@ def apply_asset_frames(args):
         positions=[current]
     end=positions[-1]
     cat_nodes=[node for node,node_kind in targets.values() if node_kind=='CAT']
-    cat=rig_root(cat_nodes,'CAT') if cat_nodes else None
+    cats=rig_roots(cat_nodes,'CAT')
+    for biped in rig_roots((node for node,node_kind in targets.values() if node_kind=='Biped'),'Biped'):
+        if rt.isProperty(biped.controller,'figureMode') and biped.controller.figureMode:
+            raise ValueError('请退出 Biped 体型模式后再覆盖帧：'+str(biped.name))
     failure=None
     with pymxs.undo(True,'LXMaxAnimation 覆盖帧'),pymxs.animate(True):
         try:
-            if cat is not None:
+            for cat in cats:
                 if int(cat.NumLayers)<1:
                     cat.AppendLayer('LX Pose',rt.Name('Absolute'))
                 cat.CATMode=1
@@ -510,11 +542,15 @@ def apply_asset_frames(args):
         raise failure
     label='T-pose' if kind=='model' else 'Pose'
     message=f'动画已追加到 {start:g}–{end:g} 帧。' if kind=='animation' else f'{label} 已应用到当前帧（{start:g}）。'
-    message+=f'已打键 {len(targets)} 个对象。'
+    native_nodes={rig_type:sum(node_kind==rig_type for _,node_kind in targets.values())
+                  for rig_type in ('Biped','CAT')}
+    native_summary='、'.join(f'{rig_type} {total} 个' for rig_type,total in native_nodes.items() if total)
+    message+=f'已打键 {len(targets)} 个对象'+(f'（{native_summary}）' if native_summary else '')+'。'
     if skipped:
         message+=f'跳过 {len(skipped)} 个对象：'+'、'.join(skipped[:4])+('…' if len(skipped)>4 else '。')
     return dict(ok=True,message=message,start=start,end=end,appliedNodes=len(targets),
-                skippedNodes=skipped,skippedTracks=sum(sub is None for sub in track_cache.values()))
+                nativeRigNodes=native_nodes,skippedNodes=skipped,
+                skippedTracks=sum(sub is None for sub in track_cache.values()))
 
 
 def param(export,name,value=None):
@@ -804,7 +840,7 @@ class Bridge:
         self.busy=True
         rt.LXMaxAnimationCanReload=False
         try:
-            write_json(self.root/'info.json',{'protocol':2,'fullCharacterScene':1,'keyAssetOperations':1,'assetWorkspace':1,'frameApply':1,'package':self.package,'bridgeDigest':self.digest,'pid':os.getpid(),'birth':self.birth,'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0]),'frame':float(rt.sliderTime),'start':float(rt.animationRange.start),'end':float(rt.animationRange.end),'fps':int(rt.frameRate),'selection':[str(n.name) for n in rt.selection]})
+            write_json(self.root/'info.json',{'protocol':2,'fullCharacterScene':1,'keyAssetOperations':1,'assetWorkspace':1,'frameApply':2,'package':self.package,'bridgeDigest':self.digest,'pid':os.getpid(),'birth':self.birth,'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0]),'frame':float(rt.sliderTime),'start':float(rt.animationRange.start),'end':float(rt.animationRange.end),'fps':int(rt.frameRate),'selection':[str(n.name) for n in rt.selection]})
             for path in self.root.glob('*.request.json'):
                 working=path.with_suffix('.working');path.rename(working)
                 try:

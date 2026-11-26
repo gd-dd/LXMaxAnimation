@@ -66,7 +66,7 @@ def call_through_session(bridge, path, kind, expected):
     session = builtins._lx_animation_bridge
     assert session.root.is_relative_to(OUTPUT)
     info = json.loads((session.root / 'info.json').read_text('utf8'))
-    assert info['frameApply'] == 1, info
+    assert info['frameApply'] == 2, info
     request = dict(action=ACTION, expires=time.time()+30,
                    args=dict(path=str(path), kind=kind, rig='Generic', sourceFps=24, expectedScene=expected))
     bridge['write_json'](session.root / 'verify-frame.request.json', request)
@@ -293,6 +293,42 @@ def built_in_rig(bridge, rig):
     return dict(pose=learned, animation=extended)
 
 
+def old_mixed_biped(bridge):
+    reset(30, 0, 8)
+    biped = rt.biped.createNew(100, 0, rt.point3(0, 0, 0))
+    biped.controller.figureMode = False
+    control = rt.Dummy(name='IndependentControl')
+    with pymxs.animate(True):
+        for frame, value in ((0, 7), (8, 25)):
+            with pymxs.attime(frame):
+                rt.biped.setTransform(biped, rt.Name('pos'), rt.point3(value, 0, 50), True)
+                move(control, -value)
+    rt.sliderTime = 0
+    tpose = capture(bridge, 'legacy-mixed-tpose', 'model', 'Generic')
+    animation = capture(bridge, 'legacy-mixed-animation', 'animation', 'Generic')
+    for sidecar in (tpose,animation):
+        data = json.loads(sidecar.read_bytes())
+        data['rig'] = 'Generic'
+        sidecar.write_text(json.dumps(data,ensure_ascii=False), encoding='utf8')
+    model = rt.Box(name='LocalModel', length=77)
+    rt.animationRange = rt.interval(0, 12)
+    rt.sliderTime = 10
+    pose = call(bridge, tpose, 'model', rig='Generic', fps=30)
+    assert pose['ok'] and 'T-pose' in pose['message'], pose
+    assert_close(point(biped, 10)[0], 7)
+    assert_close(point(control, 10)[0], -7)
+    assert_close(point(biped, 8)[0], 25)
+    assert_close(point(control, 8)[0], -25)
+    extended = call(bridge, animation, 'animation', rig='Generic', fps=30)
+    assert extended['ok'] and (extended['start'], extended['end']) == (13, 21), extended
+    assert_close(point(biped, 21)[0], 25)
+    assert_close(point(control, 21)[0], -25)
+    assert_close(point(biped, 8)[0], 25)
+    assert_close(point(control, 8)[0], -25)
+    assert_close(model.length,77)
+    return dict(tpose=pose, animation=extended)
+
+
 report = {
     'ok': False,
     'pid': os.getpid(),
@@ -305,7 +341,8 @@ connection_root.mkdir(parents=True)
 rt.execute('global LXMaxAutoConnectRoot')
 rt.LXMaxAutoConnectRoot = str(connection_root)
 bridge = runpy.run_path(str(ROOT / 'max/bridge.py'))
-for label, exercise in (('Generic', generic), ('Hidden keys', animated_past_timeline), ('Biped', built_in_rig), ('CAT', built_in_rig)):
+for label, exercise in (('Generic', generic), ('Hidden keys', animated_past_timeline),
+                        ('Biped', built_in_rig), ('CAT', built_in_rig), ('Legacy mixed Biped', old_mixed_biped)):
     try:
         details = exercise(bridge, label) if label in ('Biped', 'CAT') else exercise(bridge)
         report['cases'][label] = dict(ok=True, **details)

@@ -166,13 +166,13 @@ with tempfile.TemporaryDirectory() as temp:
     old_pose=library.publish('新角色','TPose','pose',source,'pose.json',metadata={'frame':0})
     new_pose=library.publish('新角色','TPose','pose',source,'pose.json',metadata={'frame':0})
     tpose=library.publish('新角色','基准','model',source,'source.max',metadata={'frame':0})
-    target=dict(ready,frameApply=1,scene=str(base/'current.max'))
+    target=dict(ready,frameApply=2,scene=str(base/'current.max'))
     result=base/'applied.result.json'
-    with (patch('ui.panel.host.sessions',return_value=[ready]),
+    with (patch('ui.panel.host.sessions',return_value=[dict(ready,frameApply=1)]),
           patch('ui.panel.host.request') as request):
         panel.key_asset.click()
         request.assert_not_called()
-        assert '自动更新连接' in panel.status.text()
+        assert '旧版连接组件' in panel.status.text()
     for asset,payload in ((saved,'animation-keys.json'),(new_pose,'pose.json'),(tpose,'tpose.json')):
         panel.refresh_assets(select_id=asset['id'])
         panel.bind_asset(saved,target['directory'],target['scene'])

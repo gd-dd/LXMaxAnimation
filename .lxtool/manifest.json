@@ -3,7 +3,7 @@
   "kind": "lx-tool",
   "name": "LXMaxAnimation",
   "description": "连接 Max，以 T-pose 管理角色、完整动画场景和 Pose，编辑独立 Clip 配置。",
-  "version": "0.0.16",
+  "version": "0.0.17",
   "category": "动画管线",
   "icon": ".lxtool/icon.png",
   "readme": ".lxtool/README.md",
@@ -12,13 +12,13 @@
   "actions": {},
   "files": {
     ".lxtool/icon.png": "7a100cb728acb642ab228373a4bff7475b3704aafbcad7863531322217bebfd2",
-    ".lxtool/README.md": "52c9476943515bb428acfc3ce9fa179f46bc0bd19c4800d9ed0cdf7c88bf0bc5",
+    ".lxtool/README.md": "bb9c30d149c57905bac47bfa115e20a1660f520d6c36678129f489b800178a76",
     ".lxtool/panel.json": "8dbce71d0ca9feb12cbf3d05b82693b3f8c7254a05f0ed91a305a8c0fb31cdd2",
     "ui/__init__.py": "832ba713741f115fd0f348ffeb5a036e7530f4a6702e2dd341b135f0d17c6b5a",
     "ui/max_connection.py": "6bd5c516144bd2f3b6fb5aeda7ef33f2c2204b2cb723a34d53f7ddd4edc86e3c",
     "ui/library.py": "3a0216cf141bfb13dc7495cad3adb75487cccb6e27e593b3708e8633aee14fc4",
     "ui/integrations.py": "52f25796f424f82c031e52e88381f12784037e42f3675eba5478cf7b499786d0",
-    "ui/panel.py": "2b8fef9709fb1f4d4f0aa829c092f6d8680b24d3218ee660a6f10a7183679929",
+    "ui/panel.py": "81d4d57d4c47278b58257e3b4876c68b358c473ed8395ddc4d8cef014d913c7d",
     "ui/clips.py": "834a201ffb12269e18600b2a81b9eb445317aaa4575a4895ab309e0e183cfebf",
     "ui/clip_editor.py": "1684e6e245f48dde464b827ce72e8e214a66f7811a821e12563194e32b2ba884",
     "ui/dialogs.py": "a0d68cbb33c295c7d361594943d2b0114aad522aaf4a49e09c91161c2272eb25",
@@ -31,9 +31,9 @@
     "ui/icons/chevron-down.svg": "5a754cf77e5b0e936a71a9300ffcab6d97e405ecb6bc06fa169c26b234511e0b",
     "ui/icons/chevron-up.svg": "c6f9c0ce9ab58e0acbf8ca9dcced8ded341ce07d92d07c545f7915b0e8de2a7e",
     "max/bootstrap.ms": "1a09ff2eaaa37df1ff6dbca72b02336daf99877bc2b907e96b5a2be2caeda5a7",
-    "max/bridge.py": "a4a2f0be354754c1eb1cf379e8306c3ffb04a542085223e9aa5fd33b226587f9",
+    "max/bridge.py": "7ef84adcb6fda851fc23d4e57755ec4ebe8ac08624ab1cb095e385b5686d6f7f",
     "max/auto_connect.ms": "be9b55b4c38dc5c2c46e962f5639cbc0495bd0b56f7ad0026856f2501947e3f9"
   },
-  "releaseNotes": "修复覆盖帧被整场景结构校验拦截的问题。T-pose 和 Pose 一键打到当前帧，动画按原时长追加到时间轴末尾，保留已有关键帧、模型和编辑绑定。",
-  "publishedAt": "2026-11-26"
+  "releaseNotes": "修复已有角色资产标记为 Generic 时跳过 Biped 的问题。覆盖帧按实际骨架和控制器识别人物姿势，兼容已有 T-pose、Pose 和动画版本，并报告人物骨架的匹配结果。",
+  "publishedAt": "2026-11-27"
 }

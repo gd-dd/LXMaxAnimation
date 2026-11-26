@@ -621,8 +621,8 @@ class Panel(QWidget):
         if frames:
             if not frame_payload(asset):
                 raise ValueError('此版本没有可覆盖到帧的数据。')
-            if session.get('frameApply')!=1:
-                raise ValueError('正在等待 Max 空闲后自动更新连接，请稍后再点「覆盖帧」。')
+            if session.get('frameApply')!=2:
+                raise ValueError('此 Max 窗口仍在使用旧版连接组件。新版组件自动加载完成后再点「覆盖帧」。')
             options['sourceFps']=metadata.get('fps')
         else:
             self.editor.flush()
