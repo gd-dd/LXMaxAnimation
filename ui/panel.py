@@ -14,6 +14,7 @@ from . import max_connection
 from .clip_editor import ClipEditor
 from .dialogs import AssetDetailsDialog,CharacterDialog,CreateAssetDialog,LibrarySyncDialog
 from .widgets import WheelRouter,AssetTree,ElidedLabel
+from .unity_dialog import UnityImportDialog
 from .asset_git_status import asset_git_state,asset_paths,asset_status
 from .asset_git_push import push_asset
 from .git_access import access_state,describe_git_error
@@ -98,6 +99,8 @@ class Panel(QWidget):
         row=QHBoxLayout();self.avatar=QLabel();self.avatar.setFixedSize(38,38);row.addWidget(self.avatar)
         self.character_title=ElidedLabel('选择一个角色');self.character_title.setStyleSheet('font-size:18px;font-weight:650');row.addWidget(self.character_title,1)
         row.addWidget(self.button('角色库',self.open_gallery))
+        self.unity_button=self.button('导入 Unity',self.open_unity)
+        row.addWidget(self.unity_button)
         self.connect_button=self.button('连接 Max',self.start_max);row.addWidget(self.connect_button)
         more=QToolButton();more.setText('更多');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
         for title,fn in [('切换 Max 窗口',self.connect_max),('断开连接',self.disconnect),('更换 Max 程序',self.choose_max_program)]:menu.addAction(title,lambda fn=fn:self.guard(fn))
@@ -272,6 +275,55 @@ class Panel(QWidget):
     def choose_character(self,name):
         self.idle();self.editor.flush();self.active_character=name;self.editor.set_asset(None,None)
         self.update_character_header();self.refresh_assets(flush=False);self.persist()
+
+    def rename_character(self,name,new_name,on_done=None):
+        self.idle()
+        library=self.require_library()
+        root=str(library.root)
+        workspace=getattr(self.context,'workspace_state',{})
+        if workspace.get('lxgit_working_root')==root:
+            raise ValueError('LXGit 正在操作此资产库，请稍后重试。')
+        self.editor.flush()
+        workspace['animation_working_root']=root
+
+        def rename():
+            try:
+                return library.rename_character(name,new_name)
+            finally:
+                if workspace.get('animation_working_root')==root:
+                    workspace.pop('animation_working_root',None)
+
+        def done(renamed):
+            if renamed!=name:
+                previous=self.remembered_assets.pop(name,None)
+                if previous:
+                    self.remembered_assets[renamed]=previous
+                if self.active_character==name:
+                    self.editor.set_asset(None,None)
+                    self.active_character=renamed
+                binding=self.editing_asset or {}
+                if binding.get('character')==name and binding.get('library')==root and binding.get('directory'):
+                    folder=Path(binding['directory']).relative_to(library.root/'characters'/name)
+                    self.editing_asset=dict(binding,character=renamed,
+                                            directory=str(library.root/'characters'/renamed/folder))
+                self.update_character_header()
+                self.refresh_assets(flush=False,select_id=previous if self.active_character==renamed else None)
+                self.poll()
+                self.persist()
+                self.schedule_asset_scan()
+                self.set_status(f'已将「{name}」重命名为「{renamed}」。')
+            if on_done:
+                on_done(renamed)
+        try:
+            self.run_job(rename,'正在重命名角色…',done)
+        except Exception:
+            workspace.pop('animation_working_root',None)
+            raise
+
+    def open_unity(self):
+        self.idle()
+        UnityImportDialog(self).exec()
+
     def delete_character(self,name):
         self.idle()
         self.editor.flush()
@@ -1062,12 +1114,32 @@ class Panel(QWidget):
     def reload_library_assets(self):
         library=self.require_library()
         names=library.characters()
+        aliases={}
+        for name in names:
+            marker=library.root/'characters'/name/'character.json'
+            for previous in read_json(marker).get('previousNames',[]):
+                if previous not in aliases:
+                    aliases[previous]=name
+                elif aliases[previous]!=name:
+                    aliases[previous]=None
+        for previous,renamed in aliases.items():
+            if renamed and previous not in names and previous in self.remembered_assets:
+                self.remembered_assets.setdefault(renamed,self.remembered_assets.pop(previous))
         if self.active_character not in names:
-            self.active_character=names[0] if names else None
+            self.active_character=aliases.get(self.active_character) or (names[0] if names else None)
             self.editor.set_asset(None,None)
         binding=self.editing_asset or {}
         if binding.get('library')==str(library.root) and binding.get('directory'):
             marker=Path(binding['directory'])/'asset.json'
+            previous=binding.get('character')
+            renamed=aliases.get(previous) if previous not in names else None
+            if renamed and not marker.is_file():
+                old_folder=library.root/'characters'/previous
+                if marker.parent.is_relative_to(old_folder):
+                    candidate=library.root/'characters'/renamed/marker.relative_to(old_folder)
+                    if candidate.is_file() and read_json(candidate).get('id')==binding.get('id'):
+                        marker=candidate
+                        self.editing_asset=dict(binding,character=renamed,directory=str(candidate.parent))
             if not marker.is_file() or read_json(marker).get('id')!=binding.get('id'):
                 self.editing_asset=None
         self.update_character_header()

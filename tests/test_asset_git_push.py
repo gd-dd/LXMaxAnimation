@@ -106,6 +106,28 @@ class AssetPushTests(unittest.TestCase):
         self.assertEqual(read_json(self.root/b_path)['notes'],'working note')
         self.assertEqual(unrelated.read_text('utf-8'),'leave unchanged')
 
+    def test_renamed_legacy_role_requires_whole_library_push_once(self):
+        walk=self.animation('行走')
+        legacy=self.root/'characters/月猫/character.json'
+        marker=read_json(legacy)
+        marker.pop('id')
+        write_json(legacy,marker)
+        sync_git(self.root,'push')
+        before=self.remote_head()
+        renamed=self.library.rename_character('月猫','月夜猫')
+        current=self.library.list_assets(renamed)[0][0]
+        self.assertEqual(current['id'],walk['id'])
+        with self.assertRaisesRegex(ValueError,'角色已重命名'):
+            asset_sync.push_asset(self.root,current)
+        self.assertEqual(self.remote_head(),before)
+        self.assertIn(self.path(walk),self.remote_files())
+        self.assertNotIn(self.path(current),self.remote_files())
+        sync_git(self.root,'push')
+        self.assertNotIn(self.path(walk),self.remote_files())
+        self.assertIn(self.path(current),self.remote_files())
+        self.edit_notes(current,'renamed role is now synchronized')
+        self.assertIn('已推送',asset_sync.push_asset(self.root,current))
+
     def test_same_asset_existing_commit_can_be_pushed(self):
         a=self.animation('行走')
         sync_git(self.root,'push')

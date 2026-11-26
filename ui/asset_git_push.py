@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path, PurePosixPath
 
 from .integrations import git_run, require_sync_branch
-from .library import Library, read_json, safe_name
+from .library import Library, character_identity, read_json, safe_name
 
 UPSTREAM = 'refs/remotes/origin/main'
 BRANCH = 'refs/heads/main'
@@ -52,12 +52,26 @@ def _tree_files(root, revision, path):
                                '--',path,timeout=15,strip=False))
 
 
+def _check_character_rename(root, cloud, character):
+    if not cloud:
+        return
+    info = read_json(root/'characters'/character/'character.json')
+    for previous in info.get('previousNames', ()):
+        marker = f'characters/{safe_name(previous)}/character.json'
+        if previous==character or not _tree_files(root,cloud,marker):
+            continue
+        old_info = json.loads(git_run(root,'show',cloud+':'+marker,timeout=8).lstrip('\ufeff'))
+        if character_identity(previous,old_info)==character_identity(character,info):
+            raise ValueError('角色已重命名。请使用「提交推送」同步整个资产库，以便同时移动角色的所有版本。')
+
+
 def _animation_scope(root, asset, local, cloud):
     if asset.get('kind')!='animation':
         raise ValueError('请选择一个动画资产。')
     library = Library(root)
     library.asset_location(asset)
     character = safe_name(asset['character'])
+    _check_character_rename(root,cloud,character)
     name = safe_name(asset['name'])
     parent = f'characters/{character}/animation'
     versions, errors = library.list_assets(character,kind='animation')

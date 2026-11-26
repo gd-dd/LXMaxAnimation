@@ -57,6 +57,10 @@ class CharacterDialog(QDialog):
         self.cards.itemDoubleClicked.connect(lambda *_:self.panel.guard(self.choose));layout.addWidget(self.cards,1)
         row=QHBoxLayout()
         row.addWidget(self.button('创建角色',lambda:panel.create_asset(new_character=True)))
+        rename=self.button('重命名…',self.rename_role)
+        rename.setEnabled(False)
+        self.cards.currentItemChanged.connect(lambda current,_:rename.setEnabled(current is not None))
+        row.addWidget(rename)
         row.addWidget(self.button('删除角色',self.delete_role))
         more=QToolButton();more.setText('角色管理');more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup);menu=QMenu(more)
         for title,fn in [('更换头像',self.avatar),('设置分类',self.set_category),('新建分类',self.add_category)]:menu.addAction(title,lambda fn=fn:self.panel.guard(fn))
@@ -96,6 +100,24 @@ class CharacterDialog(QDialog):
 
     def choose(self):
         self.panel.choose_character(self.selected());self.accept()
+
+    def rename_role(self):
+        name=self.selected()
+        self.panel.idle()
+        role_name,ok=QInputDialog.getText(self,'重命名角色','角色名称',text=name)
+        if not ok:
+            return
+        self.panel.rename_character(name,role_name,on_done=lambda renamed:self.finish_rename(name,renamed))
+
+    def finish_rename(self,name,renamed):
+        if renamed and renamed!=name:
+            if self.search.text().casefold() not in renamed.casefold():
+                self.search.clear()
+            self.refresh()
+            for index in range(self.cards.count()):
+                if self.cards.item(index).data(Qt.ItemDataRole.UserRole)==renamed:
+                    self.cards.setCurrentRow(index)
+                    break
 
     def delete_role(self):
         name=self.selected()

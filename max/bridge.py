@@ -855,19 +855,24 @@ class Bridge:
             rt.LXMaxAnimationCanReload=not any(self.root.glob('*.request.json'))
 
 
-rt.execute('global LXMaxAnimationCanReload; global LXMaxAnimationBootstrapDigest')
-previous=getattr(builtins,'_lx_animation_bridge',None)
-replacement=Bridge(previous)
-if previous is not None:
-    previous.stop()
-try:
-    replacement.start()
-except Exception:
-    replacement.stop()
+def start_bridge():
+    rt.execute('global LXMaxAnimationCanReload; global LXMaxAnimationBootstrapDigest')
+    previous=getattr(builtins,'_lx_animation_bridge',None)
+    replacement=Bridge(previous)
     if previous is not None:
-        previous.timer.start()
-        previous.tick()
-    raise
-builtins._lx_animation_bridge=replacement
-rt.LXMaxAnimationBootstrapDigest=replacement.digest
-print('LXMaxAnimation connected. PID',os.getpid())
+        previous.stop()
+    try:
+        replacement.start()
+    except Exception:
+        replacement.stop()
+        if previous is not None:
+            previous.timer.start()
+            previous.tick()
+        raise
+    builtins._lx_animation_bridge=replacement
+    rt.LXMaxAnimationBootstrapDigest=replacement.digest
+    print('LXMaxAnimation connected. PID',os.getpid())
+
+
+if globals().get('_START_CONNECTION', True):
+    start_bridge()

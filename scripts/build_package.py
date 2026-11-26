@@ -6,8 +6,9 @@ import json
 ROOT=Path(__file__).resolve().parents[1]
 FILES=['.lxtool/icon.png','.lxtool/README.md','.lxtool/panel.json','ui/__init__.py',
        'ui/max_connection.py','ui/library.py','ui/integrations.py','ui/panel.py','ui/clips.py','ui/clip_editor.py','ui/dialogs.py','ui/widgets.py','ui/fbx_settings.py','ui/unity-schema.json',
-       'ui/asset_git_push.py','ui/asset_git_status.py','ui/git_access.py',
-       'ui/icons/chevron-down.svg','ui/icons/chevron-up.svg','max/bootstrap.ms','max/bridge.py','max/auto_connect.ms']
+       'ui/asset_git_push.py','ui/asset_git_status.py','ui/git_access.py','ui/unity_dialog.py','ui/unity_export.py',
+       'ui/icons/chevron-down.svg','ui/icons/chevron-up.svg','max/bootstrap.ms','max/bridge.py','max/auto_connect.ms',
+       'max/export_unity.py','unity/LXMaxAnimationReceiver.cs']
 manifest={'schemaVersion':2,'kind':'lx-tool','name':'LXMaxAnimation',
           'description':'连接 Max，以 T-pose 管理角色、完整动画场景和 Pose，编辑独立 Clip 配置。',
           'version':json.loads((ROOT/'.lxtool/manifest.json').read_text('utf-8-sig'))['version'],'category':'动画管线','icon':'.lxtool/icon.png',

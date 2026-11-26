@@ -62,6 +62,14 @@ def digest(path):
     return h.hexdigest()
 
 
+def character_identity(name, info):
+    identity = info.get('id')
+    if identity:
+        return uuid.UUID(identity).hex
+    # Legacy copies of the same role derive the same identifier before the first rename.
+    return uuid.uuid5(uuid.NAMESPACE_URL, 'lxmaxanimation:character:' + safe_name(name).casefold()).hex
+
+
 class Library:
     def __init__(self, root, actor=None):
         self.root = Path(root).resolve()
@@ -107,7 +115,78 @@ class Library:
             raise ValueError('角色已存在。')
         folder = contained(self.root, 'characters/' + name)
         folder.mkdir(parents=True, exist_ok=False)
-        write_json(folder / 'character.json', {'schema': 1, 'name': name})
+        write_json(folder / 'character.json', {'schema': 1, 'name': name, 'id': uuid.uuid4().hex})
+
+    def character_id(self, name):
+        name = safe_name(name)
+        folder = contained(self.root, 'characters/' + name)
+        return character_identity(name, read_json(folder / 'character.json'))
+
+    def rename_character(self, name, replacement):
+        name, replacement = safe_name(name), safe_name(replacement)
+        root = self.root / 'characters'
+        source, destination = root / name, root / replacement
+        if name not in self.characters() or source.resolve() != source:
+            raise ValueError('角色已移动或不存在，请刷新后重试。')
+        if name == replacement:
+            return name
+        if any(item.name != name and item.name.casefold() == replacement.casefold() for item in root.iterdir()):
+            raise ValueError('此名称已被其他角色或文件使用。')
+        character_file = source / 'character.json'
+        if character_file.is_symlink() or character_file.resolve() != character_file:
+            raise ValueError('角色信息文件的位置无效。')
+        info = read_json(character_file)
+        if info.get('name') != name or info.get('schema') != 1:
+            raise ValueError('角色信息不完整，无法重命名。')
+        assets, errors = self.list_assets(name)
+        if errors:
+            raise ValueError('角色包含无法读取的资产目录，请先核对资产索引。')
+        previous_names = list(dict.fromkeys([*info.get('previousNames', []), name]))
+        role_info = dict(info, name=replacement, id=character_identity(name, info),
+                         previousNames=[old for old in previous_names if old != replacement])
+        changes = [(Path('character.json'), role_info)]
+        for asset in assets:
+            record = dict(asset)
+            leaf = Path(record.pop('_directory')) / 'asset.json'
+            if leaf.is_symlink() or leaf.resolve() != leaf:
+                raise ValueError('角色包含指向其他位置的资产索引。')
+            changes.append((leaf.relative_to(source), dict(record, character=replacement)))
+
+        staging_root = self.root / '.staging'
+        if staging_root.resolve() != staging_root:
+            raise ValueError('资产库的临时目录位置无效。')
+        staging = self.stage()
+        role = staging / 'character'
+        backups, completed = [], []
+        try:
+            # Stage just the changed JSON files. Moving the role preserves all payloads
+            # and exposes the complete new index only when the final move succeeds.
+            for index, (relative, record) in enumerate(changes):
+                original = staging / f'{index}.before'
+                updated = staging / f'{index}.after'
+                shutil.copyfile(source / relative, original)
+                write_json(updated, record)
+                backups.append((relative, original, updated))
+            source.rename(role)
+            try:
+                for relative, original, updated in backups:
+                    os.replace(updated, role / relative)
+                    completed.append((relative, original))
+                if destination.exists():
+                    raise ValueError('目标目录已出现，请刷新角色库再重试。')
+                role.rename(destination)
+            except BaseException:
+                try:
+                    for relative, original in reversed(completed):
+                        os.replace(original, role / relative)
+                    role.rename(source)
+                except OSError as error:
+                    raise RuntimeError(f'无法恢复角色目录，原始数据保留在 {role}。') from error
+                raise
+        finally:
+            if not role.exists():
+                shutil.rmtree(staging)
+        return replacement
 
     def version_parent(self, character, kind, name):
         category = self.root / 'characters' / character / kind
@@ -161,7 +240,7 @@ class Library:
         if new_character:
             stage=self.stage()
             try:
-                write_json(stage/'character.json',{'schema':1,'name':character})
+                write_json(stage/'character.json',{'schema':1,'name':character,'id':uuid.uuid4().hex})
                 write_json(stage/relative/'asset.json',data)
                 role.parent.mkdir(parents=True,exist_ok=True)
                 stage.rename(role)
