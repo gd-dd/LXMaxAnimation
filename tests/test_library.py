@@ -22,6 +22,22 @@ class LibraryTests(unittest.TestCase):
     def test_tampering_detected(self):
         asset=self.asset();Path(asset['_directory'],'asset.fbx').write_bytes(b'corrupt')
         with self.assertRaises(ValueError):self.library.verify(asset)
+    def test_frame_payload_does_not_depend_on_scene_or_textures(self):
+        payload=self.root/'payload'
+        payload.mkdir()
+        (payload/'source.max').write_bytes(b'max fixture')
+        (payload/'textures.json').write_text('{}')
+        (payload/'animation-keys.json').write_text('{"schema":1}')
+        asset=self.library.publish('纳西妲','舞步','animation',payload,'source.max')
+        version=Path(asset['_directory'])
+        (version/'source.max').unlink()
+        (version/'textures.json').write_text('corrupt')
+        with self.assertRaises(ValueError):
+            self.library.verify(asset)
+        self.assertEqual(self.library.verify(asset,frames=True),version/'animation-keys.json')
+        (version/'animation-keys.json').write_text('corrupt')
+        with self.assertRaisesRegex(ValueError,'animation-keys.json'):
+            self.library.verify(asset,frames=True)
     def test_path_escape_rejected(self):
         for value in ('../bad','CON','COM1.txt','bad/name','bad\\name','a:foo','x.'):
             with self.assertRaises(ValueError):safe_name(value)

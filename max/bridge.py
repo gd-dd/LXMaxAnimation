@@ -273,6 +273,250 @@ def apply_animation(path,rig,start,end):
     return {'ok':True,'message':f'已将动画打键到 {start:g}–{end:g} 帧。'}
 
 
+def frame_node_type(node):
+    cls=str(rt.classOf(node)).casefold()
+    if 'biped' in cls:
+        return 'Biped'
+    if cls=='catparent' or rt.isProperty(node.controller,'CATParent'):
+        return 'CAT'
+    if cls in ('bone','bonegeometry'):
+        return 'bone'
+    return str(rt.superClassOf(node)).casefold()
+
+
+def frame_receivers(records,signature,rig):
+    scene={}
+    for node in rt.objects:
+        scene.setdefault(str(node.name).casefold(),[]).append(node)
+    source={item['name']:item for item in signature}
+    geometry=None
+    matched,skipped={},[]
+    for name,record in records.items():
+        candidates=scene.get(name.casefold(),())
+        if len(candidates)!=1:
+            skipped.append(f'{name}（{"缺少" if not candidates else "重名"}）')
+            continue
+        node=candidates[0]
+        parent=str(node.parent.name).casefold() if node.parent else None
+        expected_parent=record['parent'].casefold() if record['parent'] is not None else None
+        if parent!=expected_parent or (parent is not None and len(scene.get(parent,()))!=1):
+            skipped.append(f'{name}（父节点不匹配）')
+            continue
+        kind=frame_node_type(node)
+        if kind in ('Biped','CAT') and kind!=rig:
+            skipped.append(f'{name}（骨架类型不匹配）')
+            continue
+        original=source.get(name,{})
+        cls=str(rt.classOf(node)).casefold()
+        source_class=original.get('class',cls).casefold()
+        compatible=cls==source_class
+        if not compatible and kind=='geometryclass':
+            if geometry is None:
+                geometry={str(value).casefold() for value in rt.GeometryClass.classes}
+                geometry.difference_update(('bone','bonegeometry'))
+            compatible=source_class in geometry and 'biped' not in source_class and not source_class.startswith('cat')
+        if not compatible:
+            skipped.append(f'{name}（节点类型不匹配）')
+            continue
+        if kind=='geometryclass':
+            deforms={'skin','physique','skin_wrap','skin_morph'}
+            modifiers={str(rt.classOf(modifier)).casefold() for modifier in node.modifiers}
+            if deforms & (modifiers|{value.casefold() for value in original.get('modifiers',())}):
+                skipped.append(f'{name}（蒙皮模型）')
+                continue
+        if kind not in ('Biped','CAT') and str(rt.classOf(node.controller)).casefold()!='prs':
+            skipped.append(f'{name}（变换控制器不支持）')
+            continue
+        matched[name]=(node,kind)
+    # Max transforms are relative to their parent. Write parents before children.
+    ordered={}
+    def add(name):
+        if name in ordered:
+            return
+        parent=records[name]['parent']
+        if parent in matched:
+            add(parent)
+        ordered[name]=matched[name]
+    for name in matched:
+        add(name)
+    return ordered,skipped
+
+
+def animation_track_id(track):
+    return (track.get('attribute'),tuple(track['path']),tuple(track['labels']),track['controller'])
+
+
+def find_animation_track(node,kind,track):
+    # Traverse the actual transform controller, never the material or modifier branch.
+    # Legacy custom attributes were captured on the base object. Only rig nodes may
+    # reapply these values, since on a mesh they can drive changes to the model.
+    if track.get('attribute'):
+        if kind not in ('helper','helperclass','shape','shapeclass','bone','Biped','CAT'):
+            return None
+    else:
+        try:
+            first=rt.getSubAnim(node,track['path'][0])
+            if first.controller!=node.controller and first.value!=node.controller:
+                return None
+        except Exception:
+            return None
+    try:
+        return resolve_track(node,track)
+    except (RuntimeError,ValueError,AttributeError,IndexError):
+        return None
+
+
+def frame_apply_plan(frames,signature,rig):
+    records={record['name']:record for record in frames[0]}
+    if not records or len({name.casefold() for name in records})!=len(frames[0]):
+        raise ValueError('帧数据没有对象，或包含重名对象。')
+    targets,skipped=frame_receivers(records,signature,rig)
+    if not targets:
+        raise ValueError('没有匹配的可打键节点。'+'、'.join(skipped[:4]))
+    track_cache={}
+    plan=[]
+    for sample in frames:
+        values={record['name']:record for record in sample}
+        if len(values)!=len(sample) or values.keys()!=records.keys():
+            raise ValueError('动画帧中的对象清单不一致。')
+        transforms=[]
+        for name,(node,kind) in targets.items():
+            record=values[name]
+            if record['parent']!=records[name]['parent']:
+                raise ValueError('动画帧中的父子层级不一致：'+name)
+            local=record['local']
+            if len(local)!=4 or any(len(row)!=3 or not all(math.isfinite(value) for value in row) for row in local):
+                raise ValueError('无效的变换数据：'+name)
+            tracks=[]
+            for track in record.get('tracks',()):
+                identifier=(name,animation_track_id(track))
+                if identifier not in track_cache:
+                    track_cache[identifier]=find_animation_track(node,kind,track)
+                sub=track_cache[identifier]
+                if sub is not None:
+                    value=track['value']
+                    if not math.isfinite(value):
+                        raise ValueError('无效的控制器数据：'+name)
+                    tracks.append((sub,value))
+            transforms.append((node,kind,local,tracks))
+        plan.append(transforms)
+    return targets,skipped,track_cache,plan
+
+
+def frame_append_boundary(targets,track_cache,end):
+    controllers=[node.controller for node,_ in targets.values()]
+    controllers.extend(sub.controller for sub in track_cache.values() if sub is not None)
+    for controller in controllers:
+        span=rt.getTimeRange(controller,rt.Name('children'))
+        if span is not None:
+            end=max(end,float(span.end))
+    return end
+
+
+def write_frame_animation(sample,frame):
+    for node,kind,local,tracks in sample:
+        world=matrix(local)
+        if node.parent:
+            world=world*node.parent.transform
+        if kind=='Biped':
+            rt.biped.setTransform(node,rt.Name('rotation'),world.rotationPart,True)
+            rt.biped.setTransform(node,rt.Name('pos'),world.translationPart,True)
+        else:
+            node.transform=world
+            if kind!='CAT':
+                rt.addNewKey(node.controller,frame)
+    for _,_,_,tracks in sample:
+        for sub,value in tracks:
+            sub.value=value
+            rt.addNewKey(sub.controller,frame)
+
+
+def hold_frame_animation(targets,track_cache,boundary):
+    with pymxs.attime(boundary):
+        # Keep evaluated values through the old end, even for a track whose
+        # last key was well before the end of the time range.
+        track_values=[(sub,sub.value) for sub in track_cache.values() if sub is not None]
+        rig_transforms=[(node,kind,node.transform) for node,kind in targets.values() if kind in ('Biped','CAT')]
+        for node,kind in targets.values():
+            if kind not in ('Biped','CAT'):
+                rt.addNewKey(node.controller,boundary)
+        for node,kind,world in rig_transforms:
+            if kind=='Biped':
+                rt.biped.setTransform(node,rt.Name('rotation'),world.rotationPart,True)
+                rt.biped.setTransform(node,rt.Name('pos'),world.translationPart,True)
+            else:
+                node.transform=world
+        for sub,value in track_values:
+            if not rt.getKeyIndex(sub.controller,boundary):
+                sub.value=value
+                rt.addNewKey(sub.controller,boundary)
+
+
+def apply_asset_frames(args):
+    kind=args['kind']
+    if kind not in ('animation','pose','model'):
+        raise ValueError('不支持此资产类型的帧操作。')
+    path=Path(args['path'])
+    if path.suffix.lower()!='.json' or not path.is_file():
+        raise ValueError('此版本没有可应用的独立帧数据。')
+    data=json.loads(path.read_text('utf-8-sig'))
+    rig=args.get('rig','Generic')
+    if data.get('schema')!=1 or rig not in ('Generic','Biped','CAT') or data.get('rig','Generic')!=rig:
+        raise ValueError('帧数据格式或骨架类型不匹配。')
+    frames=data.get('frames') if kind=='animation' else [data.get('nodes')]
+    if not frames or not frames[0]:
+        raise ValueError('此版本没有可应用的帧数据。')
+    targets,skipped,track_cache,plan=frame_apply_plan(frames,data.get('signature') or (),rig)
+    old_range=rt.animationRange
+    current=float(rt.sliderTime)
+    boundary=float(old_range.end)
+    if kind=='animation':
+        boundary=frame_append_boundary(targets,track_cache,boundary)
+        fps=float(rt.frameRate)
+        source_fps=float(fps if args.get('sourceFps') is None else args['sourceFps'])
+        if not math.isfinite(source_fps) or source_fps<=0:
+            raise ValueError('源动画帧率无效。')
+        step=fps/source_fps
+        start=math.floor(boundary)+1
+        positions=[start+index*step for index in range(len(frames))]
+    else:
+        start=current
+        positions=[current]
+    end=positions[-1]
+    cat_nodes=[node for node,node_kind in targets.values() if node_kind=='CAT']
+    cat=rig_root(cat_nodes,'CAT') if cat_nodes else None
+    failure=None
+    with pymxs.undo(True,'LXMaxAnimation 覆盖帧'),pymxs.animate(True):
+        try:
+            if cat is not None:
+                if int(cat.NumLayers)<1:
+                    cat.AppendLayer('LX Pose',rt.Name('Absolute'))
+                cat.CATMode=1
+            if kind=='animation':
+                rt.animationRange=rt.interval(old_range.start,math.ceil(end))
+                hold_frame_animation(targets,track_cache,boundary)
+            for time_value,sample in zip(positions,plan):
+                with pymxs.attime(time_value):
+                    write_frame_animation(sample,time_value)
+        except BaseException as error:
+            failure=error
+            raise
+        finally:
+            if float(rt.sliderTime)!=current:
+                rt.sliderTime=current
+    if failure is not None:
+        if kind=='animation':
+            rt.animationRange=old_range
+        raise failure
+    label='T-pose' if kind=='model' else 'Pose'
+    message=f'动画已追加到 {start:g}–{end:g} 帧。' if kind=='animation' else f'{label} 已应用到当前帧（{start:g}）。'
+    message+=f'已打键 {len(targets)} 个对象。'
+    if skipped:
+        message+=f'跳过 {len(skipped)} 个对象：'+'、'.join(skipped[:4])+('…' if len(skipped)>4 else '。')
+    return dict(ok=True,message=message,start=start,end=end,appliedNodes=len(targets),
+                skippedNodes=skipped,skippedTracks=sum(sub is None for sub in track_cache.values()))
+
+
 def param(export,name,value=None):
     fn=rt.FBXExporterSetParam if export else rt.FBXImporterSetParam
     result=fn(name) if value is None else fn(name,value)
@@ -515,6 +759,7 @@ def execute_request(action,args):
         result['metadata']['workspaceAsset']=True
         return result
     if action=='coverScene':return import_asset(dict(args,operation='coverScene'))
+    if action=='applyAssetFrames':return apply_asset_frames(args)
     if action in ('import','keyAsset'):return import_asset(args)
     raise ValueError('Unknown action')
 
@@ -559,7 +804,7 @@ class Bridge:
         self.busy=True
         rt.LXMaxAnimationCanReload=False
         try:
-            write_json(self.root/'info.json',{'protocol':2,'fullCharacterScene':1,'keyAssetOperations':1,'assetWorkspace':1,'package':self.package,'bridgeDigest':self.digest,'pid':os.getpid(),'birth':self.birth,'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0]),'frame':float(rt.sliderTime),'start':float(rt.animationRange.start),'end':float(rt.animationRange.end),'fps':int(rt.frameRate),'selection':[str(n.name) for n in rt.selection]})
+            write_json(self.root/'info.json',{'protocol':2,'fullCharacterScene':1,'keyAssetOperations':1,'assetWorkspace':1,'frameApply':1,'package':self.package,'bridgeDigest':self.digest,'pid':os.getpid(),'birth':self.birth,'scene':str(rt.maxFilePath)+str(rt.maxFileName),'version':str(rt.maxVersion()[0]),'frame':float(rt.sliderTime),'start':float(rt.animationRange.start),'end':float(rt.animationRange.end),'fps':int(rt.frameRate),'selection':[str(n.name) for n in rt.selection]})
             for path in self.root.glob('*.request.json'):
                 working=path.with_suffix('.working');path.rename(working)
                 try:

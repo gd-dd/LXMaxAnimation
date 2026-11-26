@@ -7,8 +7,8 @@ import time
 from PySide6.QtCore import Qt,QTimer,QThread,Signal,QSize
 from PySide6.QtGui import QPixmap,QColor
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QLabel,QPushButton,QLineEdit,QTreeWidget,QTreeWidgetItem,
-    QComboBox,QSpinBox,QFileDialog,QSplitter,QHeaderView,QTabBar,QSizePolicy,QLayout,QDialog,QDialogButtonBox,QFormLayout,QMessageBox,QInputDialog,QToolButton,QMenu,QApplication,QFrame,QBoxLayout)
-from .library import Library,KINDS,read_json,contained
+    QComboBox,QFileDialog,QSplitter,QHeaderView,QTabBar,QSizePolicy,QLayout,QDialog,QDialogButtonBox,QFormLayout,QMessageBox,QInputDialog,QToolButton,QMenu,QApplication,QFrame,QBoxLayout)
+from .library import Library,KINDS,frame_payload,read_json,contained
 from . import integrations as host
 from . import max_connection
 from .clip_editor import ClipEditor
@@ -609,73 +609,51 @@ class Panel(QWidget):
         self.schedule_asset_scan()
 
     def key_selected_asset(self):
-        asset=self.selected_asset()
-        if asset['kind']=='pose':
-            self.send_to_max(asset,key=True)
-        elif asset['kind']=='animation':
-            if 'animation-keys.json' not in asset['files']:
-                raise ValueError('该版本没有可打键的轨道。请打开它，再保存一个新版动画。')
-            session=self.selected_session()
-            meta=asset['metadata']
-            dialog=QDialog(self)
-            dialog.setWindowTitle('覆盖帧 · 动画')
-            form=QFormLayout(dialog)
-            start=QSpinBox()
-            end=QSpinBox()
-            for field in (start,end):
-                field.setRange(-1000000,1000000)
-            start.setValue(int(session.get('frame',0)))
-            end.setValue(int(start.value()+meta['end']-meta['start']))
-            hint=QLabel('动画会自动缩放到指定帧段。')
-            form.addRow(hint)
-            form.addRow('目标起始帧',start)
-            form.addRow('目标结束帧',end)
-            buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
-            buttons.button(QDialogButtonBox.StandardButton.Ok).setText('覆盖帧')
-            buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('取消')
-            buttons.accepted.connect(dialog.accept)
-            buttons.rejected.connect(dialog.reject)
-            form.addRow(buttons)
-            if dialog.exec():
-                if end.value()<start.value() or (end.value()==start.value() and meta['end']>meta['start']):
-                    raise ValueError('多帧动画的结束帧必须大于起始帧。')
-                self.send_to_max(asset,action='keyAnimation',start=start.value(),end=end.value())
-        else:
-            self.send_to_max(asset,action='keyTpose')
+        self.send_to_max(self.selected_asset(),frames=True)
 
-    def send_to_max(self,asset,*,key=False,action=None,**options):
-        self.idle();self.editor.flush();session=self.selected_session();library=self.library
+    def send_to_max(self,asset,*,frames=False):
+        self.idle()
+        session=self.selected_session()
+        library=self.library
         if asset.get('placeholder'):raise ValueError('请先为此空资产保存修改。')
-        if session.get('assetWorkspace')!=1:
-            raise ValueError('正在等待 Max 自动升级连接。')
-        cover_scene=not key and not action
-        if cover_scene:
+        metadata=asset.get('metadata',{})
+        options={}
+        if frames:
+            if not frame_payload(asset):
+                raise ValueError('此版本没有可覆盖到帧的数据。')
+            if session.get('frameApply')!=1:
+                raise ValueError('正在等待 Max 空闲后自动更新连接，请稍后再点「覆盖帧」。')
+            options['sourceFps']=metadata.get('fps')
+        else:
+            self.editor.flush()
             if 'source.max' not in asset['files']:raise ValueError('此旧版本没有完整 Max 场景，可使用「覆盖帧」。')
             scene=Path(session.get('scene') or '未命名场景').name
             prompt=f'用「{asset["name"]}」覆盖 Max（PID {session["pid"]}）中的「{scene}」？未保存的修改可能丢失。'
             if QMessageBox.question(self,'覆盖场景',prompt)!=QMessageBox.StandardButton.Yes:
                 return
-        if cover_scene and asset['kind'] in ('pose','model'):
-            options['captureFrame']=asset['metadata'].get('frame')
+            if asset['kind'] in ('pose','model'):
+                options['captureFrame']=metadata.get('frame')
         def ready(path):
-            result=host.request(session,'coverScene' if cover_scene else 'keyAsset',path=str(path),
-                                kind=asset['kind'],rig=asset.get('metadata',{}).get('rig','Generic'),
-                                operation=action,key=key,expectedScene=session.get('scene',''),**options)
+            result=host.request(session,'applyAssetFrames' if frames else 'coverScene',path=str(path),
+                                kind=asset['kind'],rig=metadata.get('rig','Generic'),
+                                expectedScene=session.get('scene',''),**options)
             self.pending=dict(result=str(result),time=time.time(),type='import',session=session['directory'],
-                              coveredAsset=asset if cover_scene else None)
-            self.set_status('正在覆盖场景…' if cover_scene else '正在覆盖帧…')
-        self.run_job(lambda:library.verify(asset),'正在校验资产文件…',ready)
+                              coveredAsset=None if frames else asset)
+            self.set_status('正在应用帧到 Max…' if frames else '正在覆盖场景…')
+        self.run_job(lambda:library.verify(asset,frames=frames),
+                     '正在校验帧数据…' if frames else '正在校验资产文件…',ready)
 
     def update_selection_controls(self,asset):
         ready=bool(asset and not asset.get('placeholder'))
         self.save_button.setEnabled(asset is not None)
         self.apply_button.setEnabled(ready and 'source.max' in asset['files'])
-        kind=asset['kind'] if asset else None
-        can_key=ready and ((kind=='pose' and ('pose.json' in asset['files'] or asset['main'].endswith('.json')))
-                           or (kind=='model' and 'tpose.json' in asset['files'])
-                           or (kind=='animation' and 'animation-keys.json' in asset['files']))
-        self.key_asset.setEnabled(can_key)
-        self.key_asset.setToolTip('此版本没有可覆盖到帧的数据。' if ready and not can_key else '')
+        payload=frame_payload(asset)
+        self.key_asset.setEnabled(bool(payload))
+        hints={'animation':'一次性追加到 Max 时间轴末尾，保留现有模型和动画。',
+               'pose':'一次性把 Pose 打键到 Max 当前帧。',
+               'model':'一次性把 T-pose 打键到 Max 当前帧。'}
+        self.key_asset.setToolTip(hints[asset['kind']] if payload else
+                                  '此版本没有可覆盖到帧的数据。' if ready else '')
         self.apply_button.setToolTip('此版本没有完整 Max 场景。' if ready and not self.apply_button.isEnabled() else '')
         self.create_asset_button.setEnabled(bool(self.active_character))
         self.delete_asset_button.setEnabled(asset is not None)

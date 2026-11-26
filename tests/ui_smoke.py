@@ -85,6 +85,7 @@ with tempfile.TemporaryDirectory() as temp:
     # Inline metadata editing persists; double-click leaves the working scene alone.
     asset_item=panel.assets.currentItem();asset_item.setText(4,'新的备注')
     assert library.list_assets('测试角色','新的备注')[0][0]['id']==animation['id']
+    send_to_max=panel.send_to_max
     loaded=[];panel.send_to_max=lambda asset,**options:loaded.append(asset['id'])
     rect=panel.assets.visualItemRect(asset_item);point=QPoint(rect.left()+20,rect.center().y())
     QTest.mouseClick(panel.assets.viewport(),Qt.MouseButton.LeftButton,pos=point)
@@ -96,6 +97,7 @@ with tempfile.TemporaryDirectory() as temp:
     QTest.mouseDClick(panel.assets.viewport(),Qt.MouseButton.LeftButton,pos=point)
     QTest.qWait(QApplication.doubleClickInterval()+150)
     assert not loaded
+    panel.send_to_max=send_to_max
     second=library.publish(animation['character'],'Walk_Run','animation',source,'asset.fbx',metadata=metadata)
     panel.assets.setCurrentItem(None);panel.refresh_assets(select_id=second['id'])
     assert panel.assets.topLevelItemCount()==3 and panel.version_choice.count()==2
@@ -163,6 +165,33 @@ with tempfile.TemporaryDirectory() as temp:
     write_json(source/'pose.json',{'schema':1})
     old_pose=library.publish('新角色','TPose','pose',source,'pose.json',metadata={'frame':0})
     new_pose=library.publish('新角色','TPose','pose',source,'pose.json',metadata={'frame':0})
+    tpose=library.publish('新角色','基准','model',source,'source.max',metadata={'frame':0})
+    target=dict(ready,frameApply=1,scene=str(base/'current.max'))
+    result=base/'applied.result.json'
+    with (patch('ui.panel.host.sessions',return_value=[ready]),
+          patch('ui.panel.host.request') as request):
+        panel.key_asset.click()
+        request.assert_not_called()
+        assert '自动更新连接' in panel.status.text()
+    for asset,payload in ((saved,'animation-keys.json'),(new_pose,'pose.json'),(tpose,'tpose.json')):
+        panel.refresh_assets(select_id=asset['id'])
+        panel.bind_asset(saved,target['directory'],target['scene'])
+        binding=panel.editing_asset.copy()
+        assert panel.key_asset.isEnabled()
+        with (patch('ui.panel.host.sessions',return_value=[target]),
+              patch('ui.panel.host.request',return_value=result) as request,
+              patch.object(panel,'run_job',side_effect=lambda work,label,done:done(work())),
+              patch.object(panel.editor,'flush',side_effect=AssertionError('Frame apply must not save configuration')),
+              patch.object(QDialog,'exec',side_effect=AssertionError('Frame apply must be a single action'))):
+            panel.key_asset.click()
+            request.assert_called_once_with(target,'applyAssetFrames',path=str(Path(asset['_directory'])/payload),
+                                            kind=asset['kind'],rig='Generic',expectedScene=target['scene'],
+                                            sourceFps=asset['metadata'].get('fps'))
+            write_json(result,{'ok':True,'message':'帧应用成功。'})
+            panel.poll()
+            assert panel.pending is None and panel.editing_asset==binding
+    result.unlink()
+    library.delete_asset(tpose,False)
     panel.refresh_assets(select_id=new_pose['id'],flush=False)
     menu=panel.delete_asset_button.menu()
     assert not panel.editor.isEnabled() and panel.delete_asset_button.isEnabled()

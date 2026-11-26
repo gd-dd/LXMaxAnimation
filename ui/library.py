@@ -9,6 +9,17 @@ import uuid
 from datetime import datetime, timezone
 
 KINDS = {'model': '模型 / T-pose', 'animation': '动画', 'pose': '单帧 Pose'}
+FRAME_FILES = {'model': 'tpose.json', 'animation': 'animation-keys.json', 'pose': 'pose.json'}
+
+
+def frame_payload(asset):
+    if not asset or asset.get('placeholder'):
+        return None
+    main = asset['main']
+    if asset['kind'] == 'pose' and main.lower().endswith('.json') and main in asset['files']:
+        return main
+    filename = FRAME_FILES.get(asset['kind'])
+    return filename if filename in asset['files'] else None
 
 
 def read_json(path):
@@ -302,17 +313,21 @@ class Library:
             if staging.exists():
                 shutil.rmtree(staging)
 
-    def verify(self, asset):
+    def verify(self, asset, *, frames=False):
         if asset.get('placeholder'):
             raise ValueError('空资产还没有场景，请先保存修改。')
         folder = contained(self.root, Path(asset['_directory']).relative_to(self.root))
-        if asset['main'] not in asset['files']:
+        main = frame_payload(asset) if frames else asset['main']
+        if frames and not main:
+            raise ValueError('此版本没有可覆盖到帧的数据。')
+        if main not in asset['files']:
             raise ValueError('主文件未列入清单。')
-        for rel, expected in asset['files'].items():
+        files = {main: asset['files'][main]} if frames else asset['files']
+        for rel, expected in files.items():
             file = contained(folder, rel)
             if not file.is_file() or digest(file) != expected:
                 raise ValueError(f'文件缺失或摘要不符（可能尚未 git lfs pull）：{rel}')
-        return contained(folder, asset['main'])
+        return contained(folder, main)
 
     def import_fbx(self, character, name, kind, file):
         if kind not in ('model', 'animation'):
